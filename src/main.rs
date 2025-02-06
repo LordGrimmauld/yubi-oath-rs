@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 mod args;
-mod lib_ykoath;
+mod lib_ykoath2;
 
+use lib_ykoath2::OathSession;
 use pcsc;
 use std::process;
 // use crate::args::Cli;
@@ -17,13 +18,11 @@ fn main() {
     let readers = context.list_readers(&mut readers_buf).unwrap();
 
     // Initialize a vector to track all our detected devices
-    let mut yubikeys: Vec<lib_ykoath::YubiKey> = Vec::new();
+    let mut yubikeys: Vec<&str> = Vec::new();
 
     // Iterate over the connected USB devices
     for reader in readers {
-        yubikeys.push(lib_ykoath::YubiKey {
-            name: reader.to_str().unwrap(),
-        });
+        yubikeys.push(reader.to_str().unwrap());
     }
 
     // Show message if no YubiKey(s)
@@ -34,9 +33,10 @@ fn main() {
 
     // Print device info for all the YubiKeys we detected
     for yubikey in yubikeys {
-        let device_label: String = yubikey.name.to_owned();
+        let device_label: &str = yubikey;
         println!("Found device with label {}", device_label);
-        let codes = match yubikey.get_oath_codes() {
+        let session = OathSession::new(yubikey);
+        let codes = match session.get_oath_codes() {
             Ok(codes) => codes,
             Err(e) => {
                 println!("ERROR {}", e);
@@ -51,7 +51,7 @@ fn main() {
 
         // Enumerate the OATH codes
         for oath in codes {
-            let code = lib_ykoath::format_code(oath.code.value, oath.code.digits);
+            let code = lib_ykoath2::legacy_format_code(oath.code.value, oath.code.digits);
             let name_clone = oath.name.clone();
             let mut label_vec: Vec<&str> = name_clone.split(":").collect();
             let mut code_entry_label: String = String::from(label_vec.remove(0));

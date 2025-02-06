@@ -42,16 +42,21 @@
     in
     {
       devShells = forAllPkgs (pkgs: {
-        default = pkgs.mkShell {
-          nativeBuildInputs = [
-          ];
-          buildInputs = with pkgs; [
-            pkg-config
-            pcsclite.dev
-            rustup
-            (pkgsBuildHost.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml)
-          ];
-        };
+        default =
+          let
+            rust = pkgs.pkgsBuildHost.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+          in
+          pkgs.mkShell {
+            nativeBuildInputs = [
+            ];
+            buildInputs = with pkgs; [
+              pkg-config
+              pcsclite.dev
+              openssl.dev
+              rust
+            ];
+            shellHook = "ln -s ${rust} ./.direnv/rust";
+          };
       });
 
       packages = forAllPkgs (pkgs: {
