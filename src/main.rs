@@ -15,17 +15,17 @@ fn main() {
     let context = pcsc::Context::establish(pcsc::Scope::User).unwrap();
     let mut readers_buf = [0; 2048];
     let readers = context.list_readers(&mut readers_buf).unwrap();
-    
+
     // Initialize a vector to track all our detected devices
     let mut yubikeys: Vec<lib_ykoath::YubiKey> = Vec::new();
 
     // Iterate over the connected USB devices
     for reader in readers {
-        yubikeys.push(lib_ykoath::YubiKey{
+        yubikeys.push(lib_ykoath::YubiKey {
             name: reader.to_str().unwrap(),
         });
     }
-   
+
     // Show message if no YubiKey(s)
     if yubikeys.len() == 0 {
         println!("No yubikeys detected");
@@ -41,9 +41,9 @@ fn main() {
             Err(e) => {
                 println!("ERROR {}", e);
                 continue;
-            },
+            }
         };
-        
+
         // Show message is node codes found
         if codes.len() == 0 {
             println!("No credentials on device {}", device_label);
@@ -54,10 +54,8 @@ fn main() {
             let code = lib_ykoath::format_code(oath.code.value, oath.code.digits);
             let name_clone = oath.name.clone();
             let mut label_vec: Vec<&str> = name_clone.split(":").collect();
-            let mut code_entry_label: String = String::from(
-                label_vec.remove(0)
-            );
-        
+            let mut code_entry_label: String = String::from(label_vec.remove(0));
+
             if label_vec.len() > 0 {
                 code_entry_label.push_str(" (");
                 code_entry_label.push_str(&label_vec.join(""));
