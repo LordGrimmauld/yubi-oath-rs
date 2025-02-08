@@ -2,36 +2,30 @@ extern crate byteorder;
 /// Utilities for interacting with YubiKey OATH/TOTP functionality
 extern crate pcsc;
 use base32::Alphabet;
-use core::borrow;
 use iso7816_tlv::simple::{Tag as TlvTag, Tlv};
+use once_cell::unsync::OnceCell;
 use openssl::hash::MessageDigest;
-use openssl::version;
 use ouroboros::self_referencing;
 use regex::Regex;
-use std::mem::transmute_copy;
-use std::str::{self, FromStr};
-
-use once_cell::unsync::OnceCell;
+use std::collections::HashMap;
+use std::str::{self};
 
 use apdu_core::{Command, Response};
 
 use base64::{engine::general_purpose, Engine as _};
 use hmac::{Hmac, Mac};
 use openssl::pkcs5::pbkdf2_hmac;
-use pcsc::{Card, Context, Transaction};
+use pcsc::{Card, Transaction};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
-use lazy_static::lazy_static;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
 use std::ffi::CString;
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Read};
 use std::time::SystemTime;
-
-pub type DetectResult<'a> = Result<Vec<YubiKey<'a>>, pcsc::Error>;
 
 pub const INS_SELECT: u8 = 0xa4;
 pub const OATH_AID: [u8; 7] = [0xa0, 0x00, 0x00, 0x05, 0x27, 0x21, 0x01];
@@ -522,9 +516,14 @@ impl TransactionContext {
 }
 
 pub struct OathSession<'a> {
-    version: OnceCell<&'a str>,
+    version: &'a [u8],
     transaction_context: TransactionContext,
     pub name: &'a str,
+}
+
+fn clone_with_lifetime<'a>(data: &'a [u8]) -> Vec<u8> {
+    // Clone the slice into a new Vec<u8>
+    data.to_vec() // `to_vec()` will return a Vec<u8> that has its own ownership
 }
 
 impl<'a> OathSession<'a> {
@@ -534,19 +533,24 @@ impl<'a> OathSession<'a> {
             .apdu_read_all(0, INS_SELECT, 0x04, 0, Some(&OATH_AID))
             .unwrap();
 
+        let info_map = tlv_to_map(info_buffer);
+        for (tag, data) in &info_map {
+            // Printing tag and data
+            println!("{:?}: {:?}", tag, data);
+        }
+
         OathSession {
-            version: OnceCell::new(),
+            version: clone_with_lifetime(
+                info_map.get(&(Tag::Version as u8)).unwrap_or(&vec![0u8; 0]),
+            )
+            .leak(),
             name,
             transaction_context,
         }
     }
 
-    fn fetch_version(&self) -> &'a str {
-        return "test";
-    }
-
-    fn get_version(&self) -> &'a str {
-        *self.version.get_or_init(|| self.fetch_version())
+    pub fn get_version(&self) -> &[u8] {
+        self.version
     }
 
     /// Read the OATH codes from the device
@@ -666,6 +670,21 @@ fn to_tlv(tag: Tag, value: &[u8]) -> Vec<u8> {
     Tlv::new(TlvTag::try_from(tag as u8).unwrap(), value.to_vec())
         .unwrap()
         .to_vec()
+}
+
+fn tlv_to_map(data: Vec<u8>) -> HashMap<u8, Vec<u8>> {
+    let mut buf: &[u8] = data.leak();
+    let mut parsed_manual = HashMap::new();
+    while !buf.is_empty() {
+        let (r, remaining) = Tlv::parse(buf);
+        buf = remaining;
+        if let Ok(res) = r {
+            parsed_manual.insert(res.tag().into(), res.value().to_vec());
+        } else {
+            break; // Exit if parsing fails
+        }
+    }
+    return parsed_manual;
 }
 
 fn time_challenge(timestamp: Option<SystemTime>) -> Vec<u8> {

@@ -36,6 +36,7 @@ fn main() {
         let device_label: &str = yubikey;
         println!("Found device with label {}", device_label);
         let session = OathSession::new(yubikey);
+        println!("YubiKey version is {:?}", session.get_version());
         let codes = match session.get_oath_codes() {
             Ok(codes) => codes,
             Err(e) => {
