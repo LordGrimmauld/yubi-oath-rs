@@ -8,6 +8,8 @@ use openssl::hash::MessageDigest;
 use ouroboros::self_referencing;
 use regex::Regex;
 use std::collections::HashMap;
+use std::default;
+use std::iter::zip;
 use std::str::{self};
 
 use apdu_core::{Command, Response};
@@ -431,6 +433,9 @@ fn to_error_response(sw1: u8, sw2: u8) -> Option<String> {
     match code {
         code if code == ErrorResponse::GenericError as usize => Some(String::from("Generic error")),
         code if code == ErrorResponse::NoSpace as usize => Some(String::from("No space on device")),
+        code if code == ErrorResponse::NoSuchObject as usize => {
+            Some(String::from("No such object"))
+        }
         code if code == ErrorResponse::CommandAborted as usize => {
             Some(String::from("Command was aborted"))
         }
@@ -517,8 +522,10 @@ impl TransactionContext {
 
 pub struct OathSession<'a> {
     version: &'a [u8],
+    salt: &'a [u8],
+    challenge: &'a [u8],
     transaction_context: TransactionContext,
-    pub name: &'a str,
+    pub name: String,
 }
 
 fn clone_with_lifetime<'a>(data: &'a [u8]) -> Vec<u8> {
@@ -527,7 +534,7 @@ fn clone_with_lifetime<'a>(data: &'a [u8]) -> Vec<u8> {
 }
 
 impl<'a> OathSession<'a> {
-    pub fn new(name: &'a str) -> Self {
+    pub fn new(name: &str) -> Self {
         let transaction_context = TransactionContext::from_name(name);
         let info_buffer = transaction_context
             .apdu_read_all(0, INS_SELECT, 0x04, 0, Some(&OATH_AID))
@@ -544,7 +551,15 @@ impl<'a> OathSession<'a> {
                 info_map.get(&(Tag::Version as u8)).unwrap_or(&vec![0u8; 0]),
             )
             .leak(),
-            name,
+            salt: clone_with_lifetime(info_map.get(&(Tag::Name as u8)).unwrap_or(&vec![0u8; 0]))
+                .leak(),
+            challenge: clone_with_lifetime(
+                info_map
+                    .get(&(Tag::Challenge as u8))
+                    .unwrap_or(&vec![0u8; 0]),
+            )
+            .leak(),
+            name: name.to_string(),
             transaction_context,
         }
     }
@@ -567,76 +582,35 @@ impl<'a> OathSession<'a> {
             )),
         );
 
-        self.parse_list(&response?)
-    }
-    /// Accepts a raw byte buffer payload and parses it
-    pub fn parse_list(&self, b: &[u8]) -> Result<Vec<LegacyOathCredential>, String> {
-        let mut rdr = Cursor::new(b);
-        let mut results = Vec::new();
+        let mut key_buffer = Vec::new();
 
-        loop {
-            if let Err(_) = rdr.read_u8() {
-                break;
+        let info_map = tlv_to_lists(response?);
+        for (name_bytes, metadata) in zip(
+            info_map.get(&(Tag::Name as u8)).unwrap(), // todo: error handling
+            info_map.get(&(Tag::TruncatedResponse as u8)).unwrap(),
+        ) {
+            assert!(metadata.len() == 5);
+            let name = str::from_utf8(&name_bytes).unwrap();
+            let k_len = metadata.get(0).unwrap();
+            let k_len_enum = match *k_len {
+                6u8 => OathDigits::Six,
+                8u8 => OathDigits::Eight,
+                _ => continue,
             };
 
-            let mut len: u16 = match rdr.read_u8() {
-                Ok(len) => len as u16,
-                Err(_) => break,
-            };
+            let code = BigEndian::read_u32(&metadata[1..5]);
 
-            if len > 0x80 {
-                let n_bytes = len - 0x80;
-
-                if n_bytes == 1 {
-                    len = match rdr.read_u8() {
-                        Ok(len) => len as u16,
-                        Err(_) => break,
-                    };
-                } else if n_bytes == 2 {
-                    len = match rdr.read_u16::<BigEndian>() {
-                        Ok(len) => len,
-                        Err(_) => break,
-                    };
-                }
-            }
-
-            let mut name = Vec::with_capacity(len as usize);
-
-            unsafe {
-                name.set_len(len as usize);
-            }
-
-            if let Err(_) = rdr.read_exact(&mut name) {
-                break;
-            };
-
-            rdr.read_u8().unwrap(); // TODO: Don't discard the response tag
-            rdr.read_u8().unwrap(); // TODO: Don't discard the response lenght + 1
-
-            let digits = match rdr.read_u8() {
-                Ok(6) => OathDigits::Six,
-                Ok(8) => OathDigits::Eight,
-                Ok(_) => break,
-                Err(_) => break,
-            };
-
-            let value = match rdr.read_u32::<BigEndian>() {
-                Ok(val) => val,
-                Err(_) => break,
-            };
-
-            results.push(LegacyOathCredential::new(
-                &String::from_utf8(name).unwrap(),
+            key_buffer.push(LegacyOathCredential::new(
+                name,
                 OathCode {
-                    digits,
-                    value,
+                    digits: k_len_enum,
+                    value: code,
                     valid_from: 0,
                     valid_to: 0x7FFFFFFFFFFFFFFF,
                 },
             ));
         }
-
-        Ok(results)
+        return Ok(key_buffer);
     }
 }
 
@@ -681,6 +655,26 @@ fn tlv_to_map(data: Vec<u8>) -> HashMap<u8, Vec<u8>> {
         if let Ok(res) = r {
             parsed_manual.insert(res.tag().into(), res.value().to_vec());
         } else {
+            println!("tlv parsing error");
+            break; // Exit if parsing fails
+        }
+    }
+    return parsed_manual;
+}
+
+fn tlv_to_lists(data: Vec<u8>) -> HashMap<u8, Vec<Vec<u8>>> {
+    let mut buf: &[u8] = data.leak();
+    let mut parsed_manual: HashMap<u8, Vec<Vec<u8>>> = HashMap::new();
+    while !buf.is_empty() {
+        let (r, remaining) = Tlv::parse(buf);
+        buf = remaining;
+        if let Ok(res) = r {
+            parsed_manual
+                .entry(res.tag().into())
+                .or_insert_with(Vec::new)
+                .push(res.value().to_vec());
+        } else {
+            println!("tlv parsing error");
             break; // Exit if parsing fails
         }
     }
