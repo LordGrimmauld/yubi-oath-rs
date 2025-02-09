@@ -1,128 +1,28 @@
 extern crate byteorder;
+mod constants;
+use constants::*;
+mod transaction;
+use transaction::*;
+mod legacy;
+pub use legacy::*;
 /// Utilities for interacting with YubiKey OATH/TOTP functionality
 extern crate pcsc;
 use base32::Alphabet;
-use iso7816_tlv::simple::{Tag as TlvTag, Tlv};
 use openssl::hash::MessageDigest;
 use sha1::Sha1;
 
-use ouroboros::self_referencing;
-use regex::Regex;
-use std::collections::HashMap;
 use std::iter::zip;
 use std::str::{self};
-
-use apdu_core::{Command, Response};
 
 use base64::{engine::general_purpose, Engine as _};
 use hmac::{Hmac, Mac};
 use openssl::pkcs5::pbkdf2_hmac;
-use pcsc::{Card, Transaction};
 
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
-use std::ffi::CString;
 use std::time::SystemTime;
-
-pub const INS_SELECT: u8 = 0xa4;
-pub const OATH_AID: [u8; 7] = [0xa0, 0x00, 0x00, 0x05, 0x27, 0x21, 0x01];
-
-pub const DEFAULT_PERIOD: u32 = 30;
-pub const DEFAULT_DIGITS: OathDigits = OathDigits::Six;
-pub const DEFAULT_IMF: u32 = 0;
-
-pub enum ErrorResponse {
-    NoSpace = 0x6a84,
-    CommandAborted = 0x6f00,
-    InvalidInstruction = 0x6d00,
-    AuthRequired = 0x6982,
-    WrongSyntax = 0x6a80,
-    GenericError = 0x6581,
-    NoSuchObject = 0x6984,
-}
-
-lazy_static::lazy_static! {
-    static ref TOTP_ID_PATTERN: Regex = Regex::new(r"^([A-Za-z0-9]+):([A-Za-z0-9]+):([A-Za-z0-9]+):([0-9]+)?:([0-9]+)$").unwrap();
-}
-
-pub enum SuccessResponse {
-    MoreData = 0x61,
-    Okay = 0x9000,
-}
-
-pub enum Instruction {
-    Put = 0x01,
-    Delete = 0x02,
-    SetCode = 0x03,
-    Reset = 0x04,
-    Rename = 0x05,
-    List = 0xa1,
-    Calculate = 0xa2,
-    Validate = 0xa3,
-    CalculateAll = 0xa4,
-    SendRemaining = 0xa5,
-}
-
-#[repr(u8)]
-pub enum Mask {
-    Algo = 0x0f,
-    Type = 0xf0,
-}
-
-#[repr(u8)]
-pub enum Tag {
-    Name = 0x71,
-    NameList = 0x72,
-    Key = 0x73,
-    Challenge = 0x74,
-    Response = 0x75,
-    TruncatedResponse = 0x76,
-    Hotp = 0x77,
-    Property = 0x78,
-    Version = 0x79,
-    Imf = 0x7a,
-    Algorithm = 0x7b,
-    Touch = 0x7c,
-}
-
-#[derive(Debug, PartialEq)]
-#[repr(u8)]
-pub enum HashAlgo {
-    Sha1 = 0x01,
-    Sha256 = 0x02,
-    Sha512 = 0x03,
-}
-
-impl HashAlgo {
-    pub fn getMessageDigest(&self) -> openssl::hash::MessageDigest {
-        match self {
-            HashAlgo::Sha1 => MessageDigest::sha1(),
-            HashAlgo::Sha256 => MessageDigest::sha256(),
-            HashAlgo::Sha512 => MessageDigest::sha512(),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Copy, Clone, Eq)]
-#[repr(u8)]
-pub enum OathType {
-    Totp = 0x10,
-    Hotp = 0x20,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum OathDigits {
-    Six = 6,
-    Eight = 8,
-}
-
-pub struct ApduResponse {
-    pub buf: Vec<u8>,
-    pub sw1: u8,
-    pub sw2: u8,
-}
 
 pub struct YubiKey<'a> {
     pub name: &'a str,
@@ -162,8 +62,7 @@ impl<'a> CredentialData<'a> {
 
 #[derive(Debug, PartialEq)]
 pub struct OathCode {
-    pub digits: OathDigits,
-    pub value: u32,
+    pub display: OathCodeDisplay,
     pub valid_from: u64,
     pub valid_to: u64,
 }
@@ -347,175 +246,10 @@ fn format_code(credential: &OathCredential, timestamp: u64, truncated: &[u8]) ->
         OathType::Hotp => (timestamp, 0x7FFFFFFFFFFFFFFF),
     };
 
-    let digits = truncated[0] as usize;
-
-    // Convert the truncated bytes to an integer and mask with 0x7FFFFFFF, then apply mod 10^digits
-    let code_value = BigEndian::read_u32(&truncated[1..]) & 0x7FFFFFFF; // Adjust endianess here
-    let mod_value = 10u32.pow(digits as u32);
-    let code_str = format!("{:0width$}", (code_value % mod_value), width = digits);
-
     OathCode {
-        digits: if digits == 6 {
-            OathDigits::Six
-        } else if digits == 8 {
-            OathDigits::Eight
-        } else {
-            panic!()
-        },
-        value: code_value,
+        display: OathCodeDisplay::new(truncated[..].try_into().unwrap()),
         valid_from,
         valid_to,
-    }
-}
-
-/// Sends the APDU package to the device
-pub fn apdu(
-    tx: &pcsc::Transaction,
-    class: u8,
-    instruction: u8,
-    parameter1: u8,
-    parameter2: u8,
-    data: Option<&[u8]>,
-) -> Result<ApduResponse, String> {
-    let command = if let Some(data) = data {
-        Command::new_with_payload(class, instruction, parameter1, parameter2, data)
-    } else {
-        Command::new(class, instruction, parameter1, parameter2)
-    };
-
-    let tx_buf: Vec<u8> = command.into();
-
-    // Construct an empty buffer to hold the response
-    let mut rx_buf = [0; pcsc::MAX_BUFFER_SIZE];
-
-    // Write the payload to the device and error if there is a problem
-    let rx_buf = match tx.transmit(&tx_buf, &mut rx_buf) {
-        Ok(slice) => slice,
-        Err(err) => return Err(format!("{}", err)),
-    };
-
-    let resp = Response::from(rx_buf);
-    let error_context = to_error_response(resp.trailer.0, resp.trailer.1);
-
-    if let Some(err) = error_context {
-        return Err(err);
-    }
-
-    Ok(ApduResponse {
-        buf: resp.payload.to_vec(),
-        sw1: resp.trailer.0,
-        sw2: resp.trailer.1,
-    })
-}
-
-pub fn apdu_read_all(
-    tx: &pcsc::Transaction,
-    class: u8,
-    instruction: u8,
-    parameter1: u8,
-    parameter2: u8,
-    data: Option<&[u8]>,
-) -> Result<Vec<u8>, String> {
-    let mut response_buf = Vec::new();
-    let mut resp = apdu(tx, class, instruction, parameter1, parameter2, data)?;
-    response_buf.extend(resp.buf);
-    while resp.sw1 == (SuccessResponse::MoreData as u8) {
-        resp = apdu(tx, 0, Instruction::SendRemaining as u8, 0, 0, None)?;
-        response_buf.extend(resp.buf);
-    }
-    Ok(response_buf)
-}
-
-fn to_error_response(sw1: u8, sw2: u8) -> Option<String> {
-    let code: usize = (sw1 as usize | sw2 as usize) << 8;
-
-    match code {
-        code if code == ErrorResponse::GenericError as usize => Some(String::from("Generic error")),
-        code if code == ErrorResponse::NoSpace as usize => Some(String::from("No space on device")),
-        code if code == ErrorResponse::NoSuchObject as usize => {
-            Some(String::from("No such object"))
-        }
-        code if code == ErrorResponse::CommandAborted as usize => {
-            Some(String::from("Command was aborted"))
-        }
-        code if code == ErrorResponse::AuthRequired as usize => {
-            Some(String::from("Authentication required"))
-        }
-        code if code == ErrorResponse::WrongSyntax as usize => Some(String::from("Wrong syntax")),
-        code if code == ErrorResponse::InvalidInstruction as usize => {
-            Some(String::from("Invalid instruction"))
-        }
-        code if code == SuccessResponse::Okay as usize => None,
-        sw1 if sw1 == SuccessResponse::MoreData as usize => None,
-        _ => Some(String::from("Unknown error")),
-    }
-}
-
-#[self_referencing]
-struct TransactionContext {
-    card: Card,
-    #[borrows(mut card)]
-    #[covariant]
-    transaction: Transaction<'this>,
-}
-
-impl TransactionContext {
-    pub fn from_name(name: &str) -> Self {
-        // FIXME: error handling here
-
-        // Establish a PC/SC context
-        let ctx = pcsc::Context::establish(pcsc::Scope::User).unwrap();
-
-        // Connect to the card
-        let card = ctx
-            .connect(
-                &CString::new(name).unwrap(),
-                pcsc::ShareMode::Shared,
-                pcsc::Protocols::ANY,
-            )
-            .unwrap();
-
-        TransactionContextBuilder {
-            card,
-            transaction_builder: |c| c.transaction().unwrap(),
-        }
-        .build()
-    }
-
-    pub fn apdu(
-        &self,
-        class: u8,
-        instruction: u8,
-        parameter1: u8,
-        parameter2: u8,
-        data: Option<&[u8]>,
-    ) -> Result<ApduResponse, String> {
-        apdu(
-            self.borrow_transaction(),
-            class,
-            instruction,
-            parameter1,
-            parameter2,
-            data,
-        )
-    }
-
-    pub fn apdu_read_all(
-        &self,
-        class: u8,
-        instruction: u8,
-        parameter1: u8,
-        parameter2: u8,
-        data: Option<&[u8]>,
-    ) -> Result<Vec<u8>, String> {
-        apdu_read_all(
-            self.borrow_transaction(),
-            class,
-            instruction,
-            parameter1,
-            parameter2,
-            data,
-        )
     }
 }
 
@@ -589,21 +323,12 @@ impl<'a> OathSession<'a> {
             info_map.get(&(Tag::TruncatedResponse as u8)).unwrap(),
         ) {
             assert!(metadata.len() == 5);
+            let display = OathCodeDisplay::new(metadata[..].try_into().unwrap());
             let name = str::from_utf8(&name_bytes).unwrap();
-            let k_len = metadata.get(0).unwrap();
-            let k_len_enum = match *k_len {
-                6u8 => OathDigits::Six,
-                8u8 => OathDigits::Eight,
-                _ => continue,
-            };
-
-            let code = BigEndian::read_u32(&metadata[1..5]);
-
             key_buffer.push(LegacyOathCredential::new(
                 name,
                 OathCode {
-                    digits: k_len_enum,
-                    value: code,
+                    display,
                     valid_from: 0,
                     valid_to: 0x7FFFFFFFFFFFFFFF,
                 },
@@ -611,73 +336,6 @@ impl<'a> OathSession<'a> {
         }
         return Ok(key_buffer);
     }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct LegacyOathCredential {
-    pub name: String,
-    pub code: OathCode,
-    //  TODO: Support this stuff
-    //    pub oath_type: OathType,
-    //    pub touch: bool,
-    //    pub algo: OathAlgo,
-    //    pub hidden: bool,
-    //    pub steam: bool,
-}
-
-impl LegacyOathCredential {
-    pub fn new(name: &str, code: OathCode) -> LegacyOathCredential {
-        LegacyOathCredential {
-            name: name.to_string(),
-            code: code,
-            //            oath_type: oath_type,
-            //            touch: touch,
-            //            algo: algo,
-            //            hidden: name.starts_with("_hidden:"),
-            //            steam: name.starts_with("Steam:"),
-        }
-    }
-}
-
-fn to_tlv(tag: Tag, value: &[u8]) -> Vec<u8> {
-    Tlv::new(TlvTag::try_from(tag as u8).unwrap(), value.to_vec())
-        .unwrap()
-        .to_vec()
-}
-
-fn tlv_to_map(data: Vec<u8>) -> HashMap<u8, Vec<u8>> {
-    let mut buf: &[u8] = data.leak();
-    let mut parsed_manual = HashMap::new();
-    while !buf.is_empty() {
-        let (r, remaining) = Tlv::parse(buf);
-        buf = remaining;
-        if let Ok(res) = r {
-            parsed_manual.insert(res.tag().into(), res.value().to_vec());
-        } else {
-            println!("tlv parsing error");
-            break; // Exit if parsing fails
-        }
-    }
-    return parsed_manual;
-}
-
-fn tlv_to_lists(data: Vec<u8>) -> HashMap<u8, Vec<Vec<u8>>> {
-    let mut buf: &[u8] = data.leak();
-    let mut parsed_manual: HashMap<u8, Vec<Vec<u8>>> = HashMap::new();
-    while !buf.is_empty() {
-        let (r, remaining) = Tlv::parse(buf);
-        buf = remaining;
-        if let Ok(res) = r {
-            parsed_manual
-                .entry(res.tag().into())
-                .or_insert_with(Vec::new)
-                .push(res.value().to_vec());
-        } else {
-            println!("tlv parsing error");
-            break; // Exit if parsing fails
-        }
-    }
-    return parsed_manual;
 }
 
 fn time_challenge(timestamp: Option<SystemTime>) -> Vec<u8> {
@@ -700,25 +358,4 @@ fn time_challenge(timestamp: Option<SystemTime>) -> Vec<u8> {
     };
     buf.write_u64::<BigEndian>(ts).unwrap();
     buf
-}
-
-pub fn legacy_format_code(code: u32, digits: OathDigits) -> String {
-    let mut code_string = code.to_string();
-
-    match digits {
-        OathDigits::Six => {
-            if code_string.len() <= 6 {
-                format!("{:0>6}", code_string)
-            } else {
-                code_string.split_off(code_string.len() - 6)
-            }
-        }
-        OathDigits::Eight => {
-            if code_string.len() <= 8 {
-                format!("{:0>8}", code_string)
-            } else {
-                code_string.split_off(code_string.len() - 8)
-            }
-        }
-    }
 }

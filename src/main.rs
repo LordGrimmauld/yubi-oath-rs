@@ -52,7 +52,7 @@ fn main() {
 
         // Enumerate the OATH codes
         for oath in codes {
-            let code = lib_ykoath2::legacy_format_code(oath.code.value, oath.code.digits);
+            let code = oath.code.display.display();
             let name_clone = oath.name.clone();
             let mut label_vec: Vec<&str> = name_clone.split(":").collect();
             let mut code_entry_label: String = String::from(label_vec.remove(0));
