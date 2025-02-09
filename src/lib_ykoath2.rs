@@ -3,12 +3,12 @@ extern crate byteorder;
 extern crate pcsc;
 use base32::Alphabet;
 use iso7816_tlv::simple::{Tag as TlvTag, Tlv};
-use once_cell::unsync::OnceCell;
 use openssl::hash::MessageDigest;
+use sha1::Sha1;
+
 use ouroboros::self_referencing;
 use regex::Regex;
 use std::collections::HashMap;
-use std::default;
 use std::iter::zip;
 use std::str::{self};
 
@@ -18,15 +18,12 @@ use base64::{engine::general_purpose, Engine as _};
 use hmac::{Hmac, Mac};
 use openssl::pkcs5::pbkdf2_hmac;
 use pcsc::{Card, Transaction};
-use sha1::Sha1;
-use sha2::{Digest, Sha256};
 
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
-use byteorder::{BigEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
+use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use std::ffi::CString;
-use std::io::{Cursor, Read};
 use std::time::SystemTime;
 
 pub const INS_SELECT: u8 = 0xa4;
@@ -96,6 +93,16 @@ pub enum HashAlgo {
     Sha1 = 0x01,
     Sha256 = 0x02,
     Sha512 = 0x03,
+}
+
+impl HashAlgo {
+    pub fn getMessageDigest(&self) -> openssl::hash::MessageDigest {
+        match self {
+            HashAlgo::Sha1 => MessageDigest::sha1(),
+            HashAlgo::Sha256 => MessageDigest::sha256(),
+            HashAlgo::Sha512 => MessageDigest::sha512(),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Copy, Clone, Eq)]
@@ -280,9 +287,9 @@ fn _parse_cred_id(cred_id: &[u8], oath_type: OathType) -> (Option<String>, Strin
 
 fn _get_device_id(salt: Vec<u8>) -> String {
     // Create SHA-256 hash of the salt
-    let mut hasher = Sha256::new();
-    hasher.update(salt);
-    let result = hasher.finalize();
+    let mut hasher = openssl::hash::Hasher::new(MessageDigest::sha256()).unwrap();
+    hasher.update(salt.leak()).unwrap();
+    let result = hasher.finish().unwrap();
 
     // Get the first 16 bytes of the hash
     let hash_16_bytes = &result[..16];
@@ -307,14 +314,6 @@ fn _derive_key(salt: &[u8], passphrase: &str) -> Vec<u8> {
     )
     .unwrap();
     key
-}
-
-fn get_message_digest(algo: HashAlgo) -> MessageDigest {
-    match algo {
-        HashAlgo::Sha1 => MessageDigest::sha1(),
-        HashAlgo::Sha256 => MessageDigest::sha256(),
-        HashAlgo::Sha512 => MessageDigest::sha512(),
-    }
 }
 
 fn _hmac_shorten_key(key: &[u8], algo: MessageDigest) -> Vec<u8> {
