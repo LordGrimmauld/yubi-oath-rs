@@ -55,7 +55,6 @@
               openssl.dev
               rust
             ];
-            shellHook = "ln -s ${rust} ./.direnv/rust";
           };
       });
 

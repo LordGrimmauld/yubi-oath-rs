@@ -52,20 +52,7 @@ fn main() {
 
         // Enumerate the OATH codes
         for oath in codes {
-            let code = oath.code.display.display();
-            let name_clone = oath.name.clone();
-            let mut label_vec: Vec<&str> = name_clone.split(":").collect();
-            let mut code_entry_label: String = String::from(label_vec.remove(0));
-
-            if label_vec.len() > 0 {
-                code_entry_label.push_str(" (");
-                code_entry_label.push_str(&label_vec.join(""));
-                code_entry_label.push_str(") ");
-            }
-
-            code_entry_label.push_str(&code.clone().to_owned());
-
-            println!("Found OATH label: {}", code_entry_label);
+            println!("Found OATH label: {}", oath.display());
         }
     }
 }

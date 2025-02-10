@@ -3,15 +3,12 @@ mod constants;
 use constants::*;
 mod transaction;
 use transaction::*;
-mod legacy;
-pub use legacy::*;
 /// Utilities for interacting with YubiKey OATH/TOTP functionality
 extern crate pcsc;
 use base32::Alphabet;
 use openssl::hash::MessageDigest;
 use sha1::Sha1;
 
-use std::iter::zip;
 use std::str::{self};
 
 use base64::{engine::general_purpose, Engine as _};
@@ -21,7 +18,7 @@ use openssl::pkcs5::pbkdf2_hmac;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
-use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
+use byteorder::{BigEndian, WriteBytesExt};
 use std::time::SystemTime;
 
 pub struct YubiKey<'a> {
@@ -71,31 +68,25 @@ pub struct OathCode {
 pub struct OathCredential<'a> {
     device_id: &'a str,
     id: Vec<u8>,
-    issuer: Option<&'a str>,
-    name: &'a str,
+    issuer: Option<String>,
+    name: String,
     oath_type: OathType,
     period: u64,
-    touch_required: Option<bool>,
-    //  TODO: Support this stuff
-    //    pub oath_type: OathType,
-    //    pub touch: bool,
-    //    pub algo: OathAlgo,
-    //    pub hidden: bool,
-    //    pub steam: bool,
+    touch_required: bool,
+    pub code: Option<OathCodeDisplay>,
 }
 
 impl<'a> OathCredential<'a> {
-    /* pub fn new(name: &str, code: OathCode) -> OathCredential {
-        OathCredential {
-            name,
-            code,
-            //            oath_type: oath_type,
-            //            touch: touch,
-            //            algo: algo,
-            //            hidden: name.starts_with("_hidden:"),
-            //            steam: name.starts_with("Steam:"),
-        }
-    } */
+    pub fn display(&self) -> String {
+        format!(
+            "{}: {}",
+            self.name,
+            self.code
+                .as_ref()
+                .map(OathCodeDisplay::display)
+                .unwrap_or("".to_string())
+        )
+    }
 }
 
 impl<'a> PartialOrd for OathCredential<'a> {
@@ -103,7 +94,7 @@ impl<'a> PartialOrd for OathCredential<'a> {
         let a = (
             self.issuer
                 .clone()
-                .unwrap_or_else(|| self.name)
+                .unwrap_or_else(|| self.name.clone())
                 .to_lowercase(),
             self.name.to_lowercase(),
         );
@@ -111,7 +102,7 @@ impl<'a> PartialOrd for OathCredential<'a> {
             other
                 .issuer
                 .clone()
-                .unwrap_or_else(|| other.name)
+                .unwrap_or_else(|| other.name.clone())
                 .to_lowercase(),
             other.name.to_lowercase(),
         );
@@ -148,7 +139,7 @@ fn _format_cred_id(issuer: Option<&str>, name: &str, oath_type: OathType, period
 }
 
 // Function to parse the credential ID
-fn _parse_cred_id(cred_id: &[u8], oath_type: OathType) -> (Option<String>, String, u32) {
+fn _parse_cred_id(cred_id: &[u8], oath_type: OathType) -> (Option<String>, String, u64) {
     let data = match str::from_utf8(cred_id) {
         Ok(d) => d.to_string(),
         Err(_) => return (None, String::new(), 0), // Handle invalid UTF-8
@@ -163,9 +154,13 @@ fn _parse_cred_id(cred_id: &[u8], oath_type: OathType) -> (Option<String>, Strin
                 DEFAULT_PERIOD
             };
 
-            return (Some(caps[4].to_string()), caps[5].to_string(), period);
+            return (
+                Some(caps[4].to_string()),
+                caps[5].to_string(),
+                period.into(),
+            );
         } else {
-            return (None, data, DEFAULT_PERIOD);
+            return (None, data, DEFAULT_PERIOD.into());
         }
     } else {
         let (issuer, rest) = if let Some(pos) = data.find(':') {
@@ -302,7 +297,7 @@ impl<'a> OathSession<'a> {
     }
 
     /// Read the OATH codes from the device
-    pub fn get_oath_codes(&self) -> Result<Vec<LegacyOathCredential>, String> {
+    pub fn get_oath_codes(&self) -> Result<Vec<OathCredential>, String> {
         // Request OATH codes from device
         let response = self.transaction_context.apdu_read_all(
             0,
@@ -317,23 +312,34 @@ impl<'a> OathSession<'a> {
 
         let mut key_buffer = Vec::new();
 
-        let info_map = tlv_to_lists(response?);
-        for (name_bytes, metadata) in zip(
-            info_map.get(&(Tag::Name as u8)).unwrap(), // todo: error handling
-            info_map.get(&(Tag::TruncatedResponse as u8)).unwrap(),
-        ) {
-            assert!(metadata.len() == 5);
-            let display = OathCodeDisplay::new(metadata[..].try_into().unwrap());
-            let name = str::from_utf8(&name_bytes).unwrap();
-            key_buffer.push(LegacyOathCredential::new(
+        for (cred_id, meta) in TlvZipIter::from_vec(response?) {
+            // let name = str::from_utf8(&cred_id.value()).unwrap();
+            let oath_type = if Into::<u8>::into(meta.tag()) == (Tag::Hotp as u8) {
+                OathType::Hotp
+            } else {
+                OathType::Totp
+            };
+            let touch = Into::<u8>::into(meta.tag()) == (Tag::Touch as u8); // touch only works with totp, this is intended
+            let (issuer, name, period) = _parse_cred_id(cred_id.value(), oath_type);
+            let cred = OathCredential {
+                device_id: &self.name,
+                id: meta.value().to_vec(),
+                issuer,
                 name,
-                OathCode {
-                    display,
-                    valid_from: 0,
-                    valid_to: 0x7FFFFFFFFFFFFFFF,
+                period,
+                touch_required: touch,
+                oath_type,
+                code: if Into::<u8>::into(meta.tag()) == (Tag::TruncatedResponse as u8) {
+                    assert!(meta.value().len() == 5);
+                    let display = OathCodeDisplay::new(meta.value()[..].try_into().unwrap());
+                    Some(display)
+                } else {
+                    None
                 },
-            ));
+            };
+            key_buffer.push(cred);
         }
+
         return Ok(key_buffer);
     }
 }

@@ -83,7 +83,7 @@ impl HashAlgo {
     }
 }
 
-#[derive(Debug, PartialEq, Copy, Clone, Eq)]
+#[derive(Debug, PartialEq, Copy, Clone, Eq, Hash)]
 #[repr(u8)]
 pub enum OathType {
     Totp = 0x10,
@@ -96,7 +96,7 @@ pub enum OathDigits {
     Eight = 8,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Hash, Eq)]
 pub struct OathCodeDisplay {
     code: u32,
     digits: u8,

@@ -3,30 +3,16 @@ extern crate byteorder;
 use crate::lib_ykoath2::*;
 /// Utilities for interacting with YubiKey OATH/TOTP functionality
 extern crate pcsc;
-use base32::Alphabet;
 use iso7816_tlv::simple::{Tag as TlvTag, Tlv};
-use openssl::hash::MessageDigest;
-use sha1::Sha1;
-
 use ouroboros::self_referencing;
-use regex::Regex;
 use std::collections::HashMap;
-use std::iter::zip;
 use std::str::{self};
 
 use apdu_core::{Command, Response};
 
-use base64::{engine::general_purpose, Engine as _};
-use hmac::{Hmac, Mac};
-use openssl::pkcs5::pbkdf2_hmac;
 use pcsc::{Card, Transaction};
 
-use std::cmp::Ordering;
-use std::hash::{Hash, Hasher};
-
-use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use std::ffi::CString;
-use std::time::SystemTime;
 
 pub struct ApduResponse {
     pub buf: Vec<u8>,
@@ -192,36 +178,75 @@ pub fn to_tlv(tag: Tag, value: &[u8]) -> Vec<u8> {
 }
 
 pub fn tlv_to_map(data: Vec<u8>) -> HashMap<u8, Vec<u8>> {
-    let mut buf: &[u8] = data.leak();
     let mut parsed_manual = HashMap::new();
-    while !buf.is_empty() {
-        let (r, remaining) = Tlv::parse(buf);
-        buf = remaining;
-        if let Ok(res) = r {
-            parsed_manual.insert(res.tag().into(), res.value().to_vec());
-        } else {
-            println!("tlv parsing error");
-            break; // Exit if parsing fails
-        }
+    for res in TlvIter::from_vec(data) {
+        parsed_manual.insert(res.tag().into(), res.value().to_vec());
     }
     return parsed_manual;
 }
 
-pub fn tlv_to_lists(data: Vec<u8>) -> HashMap<u8, Vec<Vec<u8>>> {
-    let mut buf: &[u8] = data.leak();
-    let mut parsed_manual: HashMap<u8, Vec<Vec<u8>>> = HashMap::new();
-    while !buf.is_empty() {
-        let (r, remaining) = Tlv::parse(buf);
-        buf = remaining;
-        if let Ok(res) = r {
-            parsed_manual
-                .entry(res.tag().into())
-                .or_insert_with(Vec::new)
-                .push(res.value().to_vec());
-        } else {
-            println!("tlv parsing error");
-            break; // Exit if parsing fails
+pub struct TlvZipIter<'a> {
+    iter: TlvIter<'a>,
+}
+
+impl<'a> TlvZipIter<'a> {
+    pub fn new(value: &'a [u8]) -> Self {
+        TlvZipIter {
+            iter: TlvIter::new(value).into_iter(),
         }
+    }
+    pub fn from_vec(value: Vec<u8>) -> Self {
+        TlvZipIter {
+            iter: TlvIter::from_vec(value).into_iter(),
+        }
+    }
+
+    pub fn from_tlv_iter(value: TlvIter<'a>) -> Self {
+        TlvZipIter { iter: value }
+    }
+}
+
+impl<'a> Iterator for TlvZipIter<'a> {
+    type Item = (Tlv, Tlv);
+    fn next(&mut self) -> Option<Self::Item> {
+        return Some((self.iter.next()?, self.iter.next()?));
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct TlvIter<'a> {
+    buf: &'a [u8],
+}
+
+impl<'a> TlvIter<'a> {
+    pub fn new(value: &'a [u8]) -> Self {
+        TlvIter { buf: value }
+    }
+    pub fn from_vec(value: Vec<u8>) -> Self {
+        TlvIter { buf: value.leak() }
+    }
+}
+
+impl<'a> Iterator for TlvIter<'a> {
+    type Item = Tlv;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.buf.is_empty() {
+            return None;
+        }
+        let (r, remaining) = Tlv::parse(self.buf);
+        self.buf = remaining;
+        return r.ok();
+    }
+}
+
+pub fn tlv_to_lists(data: Vec<u8>) -> HashMap<u8, Vec<Vec<u8>>> {
+    let mut parsed_manual: HashMap<u8, Vec<Vec<u8>>> = HashMap::new();
+    for res in TlvIter::from_vec(data) {
+        parsed_manual
+            .entry(res.tag().into())
+            .or_insert_with(Vec::new)
+            .push(res.value().to_vec());
     }
     return parsed_manual;
 }
