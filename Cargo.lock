@@ -24,12 +24,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c5ab921a56bbe68325ba6d3711ee2c681239fe4c9c295c6a1c2fe6992e27f86"
 
 [[package]]
-name = "base32"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "022dfe9eb35f19ebbcb51e0b40a5ab759f46ad60cadf7297e0bd085afb50e076"
-
-[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -137,7 +131,6 @@ name = "oath-rs-experiments"
 version = "0.1.0"
 dependencies = [
  "apdu-core",
- "base32",
  "base64",
  "hmac",
  "iso7816-tlv",

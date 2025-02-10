@@ -4,9 +4,8 @@ mod transaction;
 use transaction::*;
 /// Utilities for interacting with YubiKey OATH/TOTP functionality
 extern crate pcsc;
-use base32::Alphabet;
 use pbkdf2::pbkdf2_hmac_array;
-use regex::Regex;
+use regex::{Match, Regex};
 use sha1::Sha1;
 
 use std::str::{self};
@@ -18,19 +17,6 @@ use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
 use std::time::SystemTime;
-
-pub fn parse_b32_key(key: String) -> u32 {
-    let stripped = key.to_uppercase().replace(" ", "");
-    let pad = 8 - (stripped.len() % 8);
-    let padded = stripped + (&"=".repeat(pad));
-    let bytes = base32::decode(Alphabet::Rfc4648 { padding: true }, &padded).unwrap();
-    let mut bytes_array: [u8; 4] = [0, 0, 0, 0];
-    for i in 0..4 {
-        bytes_array[i] = bytes.get(i).map(|x| *x).unwrap_or(0);
-    }
-
-    return u32::from_be_bytes(bytes_array); // fixme: be or le?
-}
 
 pub struct CredentialData<'a> {
     pub name: &'a str,
@@ -135,33 +121,33 @@ fn _format_cred_id(issuer: Option<&str>, name: &str, oath_type: OathType, period
 // Function to parse the credential ID
 fn _parse_cred_id(cred_id: &[u8], oath_type: OathType) -> (Option<String>, String, u64) {
     let data = match str::from_utf8(cred_id) {
-        Ok(d) => d.to_string(),
+        Ok(d) => d,
         Err(_) => return (None, String::new(), 0), // Handle invalid UTF-8
     };
 
     if oath_type == OathType::Totp {
-        let TOTP_ID_PATTERN = Regex::new(r"^((\d+)/)?(([^:]+):)?(.+)$").unwrap();
-        if let Some(caps) = TOTP_ID_PATTERN.captures(&data) {
-            let period_str = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-            let period = if !period_str.is_empty() {
-                period_str.parse::<u32>().unwrap_or(DEFAULT_PERIOD)
-            } else {
-                DEFAULT_PERIOD
-            };
-
-            return (
-                Some(caps[4].to_string()),
-                caps[5].to_string(),
-                period.into(),
-            );
-        } else {
-            return (None, data, DEFAULT_PERIOD.into());
-        }
+        Regex::new(r"^((\d+)/)?(([^:]+):)?(.+)$")
+            .ok()
+            .and_then(|r| r.captures(&data))
+            .map_or((None, data.to_string(), DEFAULT_PERIOD as u64), |caps| {
+                let period = caps
+                    .get(2)
+                    .as_ref()
+                    .map(Match::as_str)
+                    .and_then(|s| s.parse::<u32>().ok())
+                    .unwrap_or(DEFAULT_PERIOD);
+                return (
+                    Some(caps[4].to_string()),
+                    caps[5].to_string(),
+                    period.into(),
+                );
+            })
     } else {
-        let mut components = data.split(':').rev();
-        let name = components.next().unwrap().to_string();
-        let issuer = components.next().map(str::to_string);
-        return (issuer, name, 0);
+        return data
+            .split_once(':')
+            .map_or((None, data.to_string(), 0), |(i, n)| {
+                (Some(i.to_string()), n.to_string(), 0)
+            });
     }
 }
 
@@ -290,8 +276,8 @@ impl<'a> OathSession<'a> {
             let cred = OathCredential {
                 device_id: &self.name,
                 id: meta.value().to_vec(),
-                issuer,
-                name,
+                issuer: issuer,
+                name: name,
                 period,
                 touch_required: touch,
                 oath_type,
