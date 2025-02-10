@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
-mod args;
 mod lib_ykoath2;
 
 use lib_ykoath2::OathSession;

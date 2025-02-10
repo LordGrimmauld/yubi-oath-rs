@@ -1,4 +1,3 @@
-extern crate byteorder;
 mod constants;
 use constants::*;
 mod transaction;
@@ -6,24 +5,19 @@ use transaction::*;
 /// Utilities for interacting with YubiKey OATH/TOTP functionality
 extern crate pcsc;
 use base32::Alphabet;
-use openssl::hash::MessageDigest;
+use pbkdf2::pbkdf2_hmac_array;
+use regex::Regex;
 use sha1::Sha1;
 
 use std::str::{self};
 
 use base64::{engine::general_purpose, Engine as _};
 use hmac::{Hmac, Mac};
-use openssl::pkcs5::pbkdf2_hmac;
 
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
-use byteorder::{BigEndian, WriteBytesExt};
 use std::time::SystemTime;
-
-pub struct YubiKey<'a> {
-    pub name: &'a str,
-}
 
 pub fn parse_b32_key(key: String) -> u32 {
     let stripped = key.to_uppercase().replace(" ", "");
@@ -146,6 +140,7 @@ fn _parse_cred_id(cred_id: &[u8], oath_type: OathType) -> (Option<String>, Strin
     };
 
     if oath_type == OathType::Totp {
+        let TOTP_ID_PATTERN = Regex::new(r"^((\d+)/)?(([^:]+):)?(.+)$").unwrap();
         if let Some(caps) = TOTP_ID_PATTERN.captures(&data) {
             let period_str = caps.get(2).map(|m| m.as_str()).unwrap_or("");
             let period = if !period_str.is_empty() {
@@ -163,27 +158,15 @@ fn _parse_cred_id(cred_id: &[u8], oath_type: OathType) -> (Option<String>, Strin
             return (None, data, DEFAULT_PERIOD.into());
         }
     } else {
-        let (issuer, rest) = if let Some(pos) = data.find(':') {
-            if data.chars().next() != Some(':') {
-                let issuer = data[..pos].to_string();
-                let rest = data[pos + 1..].to_string();
-                (Some(issuer), rest)
-            } else {
-                (None, data)
-            }
-        } else {
-            (None, data)
-        };
-
-        return (issuer, rest, 0);
+        let mut components = data.split(':').rev();
+        let name = components.next().unwrap().to_string();
+        let issuer = components.next().map(str::to_string);
+        return (issuer, name, 0);
     }
 }
 
 fn _get_device_id(salt: Vec<u8>) -> String {
-    // Create SHA-256 hash of the salt
-    let mut hasher = openssl::hash::Hasher::new(MessageDigest::sha256()).unwrap();
-    hasher.update(salt.leak()).unwrap();
-    let result = hasher.finish().unwrap();
+    let result = HashAlgo::Sha256.get_hash_fun()(salt.leak());
 
     // Get the first 16 bytes of the hash
     let hash_16_bytes = &result[..16];
@@ -198,36 +181,19 @@ fn _hmac_sha1(key: &[u8], message: &[u8]) -> Vec<u8> {
 }
 
 fn _derive_key(salt: &[u8], passphrase: &str) -> Vec<u8> {
-    let mut key = vec![0u8; 16]; // Allocate 16 bytes for the key
-    pbkdf2_hmac(
-        passphrase.as_bytes(),
-        salt,
-        1000,
-        MessageDigest::sha1(),
-        &mut key,
-    )
-    .unwrap();
-    key
+    pbkdf2_hmac_array::<Sha1, 16>(passphrase.as_bytes(), salt, 1000).to_vec()
 }
 
-fn _hmac_shorten_key(key: &[u8], algo: MessageDigest) -> Vec<u8> {
-    if key.len() > algo.block_size() {
-        let mut hasher = openssl::hash::Hasher::new(algo).unwrap();
-        hasher.update(key).unwrap();
-        return hasher.finish().unwrap().to_vec();
+fn _hmac_shorten_key(key: &[u8], algo: HashAlgo) -> Vec<u8> {
+    if key.len() > algo.digest_size() {
+        algo.get_hash_fun()(key)
+    } else {
+        key.to_vec()
     }
-
-    key.to_vec()
 }
 
 fn _get_challenge(timestamp: u32, period: u32) -> [u8; 8] {
-    let time_step = timestamp / period;
-
-    let mut buffer = [0u8; 8];
-    let mut cursor = &mut buffer[..];
-    cursor.write_u64::<BigEndian>(time_step as u64).unwrap();
-
-    buffer
+    return ((timestamp / period) as u64).to_be_bytes();
 }
 
 fn format_code(credential: &OathCredential, timestamp: u64, truncated: &[u8]) -> OathCode {
@@ -345,23 +311,12 @@ impl<'a> OathSession<'a> {
 }
 
 fn time_challenge(timestamp: Option<SystemTime>) -> Vec<u8> {
-    let mut buf = Vec::new();
-    let ts = match timestamp {
-        Some(datetime) => {
-            datetime
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-                / 30
-        }
-        None => {
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-                / 30
-        }
-    };
-    buf.write_u64::<BigEndian>(ts).unwrap();
-    buf
+    (timestamp
+        .unwrap_or_else(SystemTime::now)
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        / 30)
+        .to_be_bytes()
+        .to_vec()
 }

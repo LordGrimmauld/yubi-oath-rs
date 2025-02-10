@@ -1,5 +1,4 @@
 #[crate_type = "lib"]
-extern crate byteorder;
 use crate::lib_ykoath2::*;
 /// Utilities for interacting with YubiKey OATH/TOTP functionality
 extern crate pcsc;

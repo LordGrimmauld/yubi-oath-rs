@@ -1,9 +1,6 @@
 #[crate_type = "lib"]
-use openssl::hash::MessageDigest;
-
-use byteorder::{BigEndian, ByteOrder};
-
-use regex::Regex;
+use sha1::{Digest, Sha1};
+use sha2::{Sha256, Sha512};
 pub const INS_SELECT: u8 = 0xa4;
 pub const OATH_AID: [u8; 7] = [0xa0, 0x00, 0x00, 0x05, 0x27, 0x21, 0x01];
 
@@ -19,10 +16,6 @@ pub enum ErrorResponse {
     WrongSyntax = 0x6a80,
     GenericError = 0x6581,
     NoSuchObject = 0x6984,
-}
-
-lazy_static::lazy_static! {
-    pub static ref TOTP_ID_PATTERN: Regex = Regex::new(r"^([A-Za-z0-9]+):([A-Za-z0-9]+):([A-Za-z0-9]+):([0-9]+)?:([0-9]+)$").unwrap();
 }
 
 pub enum SuccessResponse {
@@ -74,11 +67,33 @@ pub enum HashAlgo {
 }
 
 impl HashAlgo {
-    pub fn get_message_digest(&self) -> openssl::hash::MessageDigest {
+    // returns a function capable of hashing a byte array
+    pub fn get_hash_fun(&self) -> impl Fn(&[u8]) -> Vec<u8> {
         match self {
-            HashAlgo::Sha1 => MessageDigest::sha1(),
-            HashAlgo::Sha256 => MessageDigest::sha256(),
-            HashAlgo::Sha512 => MessageDigest::sha512(),
+            HashAlgo::Sha1 => |m: &[u8]| {
+                let mut hasher = Sha1::new();
+                hasher.update(m);
+                hasher.finalize().to_vec()
+            },
+            HashAlgo::Sha256 => |m: &[u8]| {
+                let mut hasher = Sha256::new();
+                hasher.update(m);
+                hasher.finalize().to_vec()
+            },
+            HashAlgo::Sha512 => |m: &[u8]| {
+                let mut hasher = Sha512::new();
+                hasher.update(m);
+                hasher.finalize().to_vec()
+            },
+        }
+    }
+
+    // returns digest output size in number of bytes
+    pub fn digest_size(&self) -> usize {
+        match self {
+            HashAlgo::Sha1 => 20,
+            HashAlgo::Sha256 => 32,
+            HashAlgo::Sha512 => 64,
         }
     }
 }
@@ -106,7 +121,7 @@ impl OathCodeDisplay {
     pub fn new(bytes: &[u8; 5]) -> Self {
         Self {
             digits: bytes[0],
-            code: BigEndian::read_u32(&bytes[1..5]),
+            code: u32::from_be_bytes((&bytes[1..5]).try_into().unwrap()),
         }
     }
 
