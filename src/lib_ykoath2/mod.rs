@@ -2,185 +2,24 @@ mod constants;
 use constants::*;
 mod transaction;
 use transaction::*;
+mod oath_credential;
+mod oath_credentialid;
+use oath_credential::*;
+use oath_credentialid::*;
 /// Utilities for interacting with YubiKey OATH/TOTP functionality
 extern crate pcsc;
 use pbkdf2::pbkdf2_hmac_array;
-use regex::Regex;
 use sha1::Sha1;
 
-use std::str::{self};
+use std::{
+    str::{self},
+    time::Duration,
+};
 
 use base64::{engine::general_purpose, Engine as _};
 use hmac::{Hmac, Mac};
 
-use std::cmp::Ordering;
-use std::hash::{Hash, Hasher};
-
 use std::time::SystemTime;
-
-#[derive(Debug)]
-pub struct CredentialIDData {
-    pub name: String,
-    oath_type: OathType,
-    issuer: Option<String>,
-    period: u32,
-}
-
-impl CredentialIDData {
-    pub fn from_tlv(id_bytes: &[u8], oath_type_tag: iso7816_tlv::simple::Tag) -> Self {
-        let oath_type = if Into::<u8>::into(oath_type_tag) == (Tag::Hotp as u8) {
-            OathType::Hotp
-        } else {
-            OathType::Totp
-        };
-        let (issuer, name, period) = CredentialIDData::parse_cred_id(id_bytes, oath_type);
-        return CredentialIDData {
-            issuer,
-            name,
-            period,
-            oath_type,
-        };
-    }
-
-    pub fn format_cred_id(&self) -> Vec<u8> {
-        let mut cred_id = String::new();
-
-        if self.oath_type == OathType::Totp && self.period != DEFAULT_PERIOD {
-            cred_id.push_str(&format!("{}/", self.period));
-        }
-
-        if let Some(issuer) = self.issuer.as_deref() {
-            cred_id.push_str(&format!("{}:", issuer));
-        }
-
-        cred_id.push_str(self.name.as_str());
-        return cred_id.into_bytes(); // Convert the string to bytes
-    }
-    fn format_code(&self, timestamp: u64, truncated: &[u8]) -> OathCode {
-        let (valid_from, valid_to) = match self.oath_type {
-            OathType::Totp => {
-                let time_step = timestamp / (self.period as u64);
-                let valid_from = time_step * (self.period as u64);
-                let valid_to = (time_step + 1) * (self.period as u64);
-                (valid_from, valid_to)
-            }
-            OathType::Hotp => (timestamp, 0x7FFFFFFFFFFFFFFF),
-        };
-
-        OathCode {
-            display: OathCodeDisplay::new(truncated[..].try_into().unwrap()),
-            valid_from,
-            valid_to,
-        }
-    }
-
-    // Function to parse the credential ID
-    fn parse_cred_id(cred_id: &[u8], oath_type: OathType) -> (Option<String>, String, u32) {
-        let data = match str::from_utf8(cred_id) {
-            Ok(d) => d,
-            Err(_) => return (None, String::new(), 0), // Handle invalid UTF-8
-        };
-
-        if oath_type == OathType::Totp {
-            Regex::new(r"^((\d+)/)?(([^:]+):)?(.+)$")
-                .ok()
-                .and_then(|r| r.captures(&data))
-                .map_or((None, data.to_string(), DEFAULT_PERIOD), |caps| {
-                    let period = (&caps.get(2))
-                        .and_then(|s| s.as_str().parse::<u32>().ok())
-                        .unwrap_or(DEFAULT_PERIOD);
-                    return (Some(caps[4].to_string()), caps[5].to_string(), period);
-                })
-        } else {
-            return data
-                .split_once(':')
-                .map_or((None, data.to_string(), 0), |(i, n)| {
-                    (Some(i.to_string()), n.to_string(), 0)
-                });
-        }
-    }
-}
-
-pub struct CredentialData {
-    id_data: CredentialIDData,
-    hash_algorithm: HashAlgo,
-    // secret: bytes,
-    digits: OathDigits, // = DEFAULT_DIGITS,
-    counter: u32,       // = DEFAULT_IMF,
-}
-
-impl CredentialData {
-    // TODO: parse_uri
-
-    pub fn get_id(&self) -> Vec<u8> {
-        return self.id_data.format_cred_id();
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct OathCode {
-    pub display: OathCodeDisplay,
-    pub valid_from: u64,
-    pub valid_to: u64,
-}
-
-#[derive(Debug)]
-pub struct OathCredential<'a> {
-    device_id: &'a str,
-    id: Vec<u8>,
-    id_data: CredentialIDData,
-    touch_required: bool,
-    pub code: Option<OathCodeDisplay>,
-}
-
-impl<'a> OathCredential<'a> {
-    pub fn display(&self) -> String {
-        format!(
-            "{}: {}",
-            self.id_data.name,
-            self.code
-                .as_ref()
-                .map(OathCodeDisplay::display)
-                .unwrap_or("".to_string())
-        )
-    }
-}
-
-impl<'a> PartialOrd for OathCredential<'a> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let a = (
-            self.id_data
-                .issuer
-                .clone()
-                .unwrap_or_else(|| self.id_data.name.clone())
-                .to_lowercase(),
-            self.id_data.name.to_lowercase(),
-        );
-        let b = (
-            other
-                .id_data
-                .issuer
-                .clone()
-                .unwrap_or_else(|| other.id_data.name.clone())
-                .to_lowercase(),
-            other.id_data.name.to_lowercase(),
-        );
-        Some(a.cmp(&b))
-    }
-}
-
-impl<'a> PartialEq for OathCredential<'a> {
-    fn eq(&self, other: &Self) -> bool {
-        self.device_id == other.device_id && self.id == other.id
-    }
-}
-
-impl<'a> Hash for OathCredential<'a> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.device_id.hash(state);
-        self.id.hash(state);
-    }
-}
 
 fn _get_device_id(salt: Vec<u8>) -> String {
     let result = HashAlgo::Sha256.get_hash_fun()(salt.leak());
@@ -226,6 +65,85 @@ fn clone_with_lifetime<'a>(data: &'a [u8]) -> Vec<u8> {
     data.to_vec() // `to_vec()` will return a Vec<u8> that has its own ownership
 }
 
+pub struct RefreshableOathCredential {
+    cred: OathCredential,
+    pub code: Option<OathCodeDisplay>,
+    pub valid_from: u64,
+    pub valid_to: u64,
+    try_refresh_func: Option<Box<dyn Fn(OathCredential, SystemTime) -> Option<OathCodeDisplay>>>,
+}
+
+impl RefreshableOathCredential {
+    pub fn new(cred: OathCredential) -> Self {
+        RefreshableOathCredential {
+            cred,
+            code: None,
+            valid_from: 0,
+            valid_to: 0,
+            try_refresh_func: None,
+        }
+    }
+
+    pub fn force_update(&mut self, code: Option<OathCodeDisplay>, timestamp: SystemTime) {
+        self.code = code;
+        (self.valid_from, self.valid_to) =
+            RefreshableOathCredential::format_validity_time_frame(&self, timestamp);
+    }
+
+    fn time_to_u64(timestamp: SystemTime) -> u64 {
+        timestamp
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .as_ref()
+            .map_or(0, Duration::as_secs)
+    }
+
+    pub fn display(&self) -> String {
+        format!(
+            "{}: {}",
+            self.cred.id_data.name,
+            self.code
+                .as_ref()
+                .map(OathCodeDisplay::display)
+                .unwrap_or("".to_string())
+        )
+    }
+
+    pub fn refresh(&mut self) {
+        let timestamp = SystemTime::now();
+        let refresh_result = if let Some(refresh_func) = self.try_refresh_func.as_deref() {
+            refresh_func(self.cred.to_owned(), timestamp)
+        } else {
+            None
+        };
+        self.force_update(refresh_result, timestamp);
+    }
+
+    pub fn get_or_refresh(mut self) -> RefreshableOathCredential {
+        if !self.is_valid() {
+            self.refresh();
+        }
+        return self;
+    }
+
+    pub fn is_valid(&self) -> bool {
+        let current_time = RefreshableOathCredential::time_to_u64(SystemTime::now());
+        self.valid_from <= current_time && current_time <= self.valid_to
+    }
+
+    fn format_validity_time_frame(&self, timestamp: SystemTime) -> (u64, u64) {
+        let timestamp_seconds = RefreshableOathCredential::time_to_u64(timestamp);
+        match self.cred.id_data.oath_type {
+            OathType::Totp => {
+                let time_step = timestamp_seconds / (self.cred.id_data.period as u64);
+                let valid_from = time_step * (self.cred.id_data.period as u64);
+                let valid_to = (time_step + 1) * (self.cred.id_data.period as u64);
+                (valid_from, valid_to)
+            }
+            OathType::Hotp => (timestamp_seconds, 0x7FFFFFFFFFFFFFFF),
+        }
+    }
+}
+
 impl<'a> OathSession<'a> {
     pub fn new(name: &str) -> Self {
         let transaction_context = TransactionContext::from_name(name);
@@ -262,17 +180,15 @@ impl<'a> OathSession<'a> {
     }
 
     /// Read the OATH codes from the device
-    pub fn get_oath_codes(&self) -> Result<Vec<OathCredential>, String> {
+    pub fn get_oath_codes(&self) -> Result<Vec<RefreshableOathCredential>, String> {
+        let timestamp = SystemTime::now();
         // Request OATH codes from device
         let response = self.transaction_context.apdu_read_all(
             0,
             Instruction::CalculateAll as u8,
             0,
             0x01,
-            Some(&to_tlv(
-                Tag::Challenge,
-                &time_challenge(Some(SystemTime::now())),
-            )),
+            Some(&to_tlv(Tag::Challenge, &time_challenge(Some(timestamp)))),
         );
 
         let mut key_buffer = Vec::new();
@@ -280,27 +196,25 @@ impl<'a> OathSession<'a> {
         for (cred_id, meta) in TlvZipIter::from_vec(response?) {
             let touch = Into::<u8>::into(meta.tag()) == (Tag::Touch as u8); // touch only works with totp, this is intended
             let id_data = CredentialIDData::from_tlv(cred_id.value(), meta.tag());
+            let code = OathCodeDisplay::from_tlv(meta);
+
             let cred = OathCredential {
-                device_id: &self.name,
-                id: meta.value().to_vec(),
+                device_id: self.name.clone(),
                 id_data,
                 touch_required: touch,
-                code: if Into::<u8>::into(meta.tag()) == (Tag::TruncatedResponse as u8) {
-                    assert!(meta.value().len() == 5);
-                    let display = OathCodeDisplay::new(meta.value()[..].try_into().unwrap());
-                    Some(display)
-                } else {
-                    None
-                },
             };
-            key_buffer.push(cred);
+
+            let mut refreshable_cred = RefreshableOathCredential::new(cred); // todo: refresh callback
+            refreshable_cred.force_update(code, timestamp);
+
+            key_buffer.push(refreshable_cred);
         }
 
         return Ok(key_buffer);
     }
 }
 
-fn time_challenge(timestamp: Option<SystemTime>) -> Vec<u8> {
+fn time_challenge(timestamp: Option<SystemTime>) -> [u8; 8] {
     (timestamp
         .unwrap_or_else(SystemTime::now)
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -308,5 +222,4 @@ fn time_challenge(timestamp: Option<SystemTime>) -> Vec<u8> {
         .as_secs()
         / 30)
         .to_be_bytes()
-        .to_vec()
 }

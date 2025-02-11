@@ -1,3 +1,4 @@
+use iso7816_tlv::simple::Tlv;
 #[crate_type = "lib"]
 use sha1::{Digest, Sha1};
 use sha2::{Sha256, Sha512};
@@ -8,6 +9,7 @@ pub const DEFAULT_PERIOD: u32 = 30;
 pub const DEFAULT_DIGITS: OathDigits = OathDigits::Six;
 pub const DEFAULT_IMF: u32 = 0;
 
+#[repr(u16)]
 pub enum ErrorResponse {
     NoSpace = 0x6a84,
     CommandAborted = 0x6f00,
@@ -18,11 +20,13 @@ pub enum ErrorResponse {
     NoSuchObject = 0x6984,
 }
 
+#[repr(u16)]
 pub enum SuccessResponse {
     MoreData = 0x61,
     Okay = 0x9000,
 }
 
+#[repr(u8)]
 pub enum Instruction {
     Put = 0x01,
     Delete = 0x02,
@@ -118,6 +122,23 @@ pub struct OathCodeDisplay {
 }
 
 impl OathCodeDisplay {
+    pub fn from_tlv(tlv: Tlv) -> Option<Self> {
+        if Into::<u8>::into(tlv.tag()) == (Tag::TruncatedResponse as u8) && tlv.value().len() == 5 {
+            let display = OathCodeDisplay::new(tlv.value()[..].try_into().unwrap());
+            Some(display)
+        } else {
+            None
+        }
+    }
+    pub fn from_bytes(tlv: Tlv) -> Option<Self> {
+        if Into::<u8>::into(tlv.tag()) == (Tag::TruncatedResponse as u8) && tlv.value().len() == 5 {
+            let display = OathCodeDisplay::new(tlv.value()[..].try_into().unwrap());
+            Some(display)
+        } else {
+            None
+        }
+    }
+
     pub fn new(bytes: &[u8; 5]) -> Self {
         Self {
             digits: bytes[0],
