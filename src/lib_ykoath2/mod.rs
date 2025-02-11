@@ -48,10 +48,16 @@ fn _hmac_shorten_key(key: &[u8], algo: HashAlgo) -> Vec<u8> {
     }
 }
 
-fn _get_challenge(timestamp: u32, period: u32) -> [u8; 8] {
+fn _get_challenge(timestamp: u64, period: u64) -> [u8; 8] {
     return ((timestamp / period) as u64).to_be_bytes();
 }
 
+fn time_to_u64(timestamp: SystemTime) -> u64 {
+    timestamp
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .as_ref()
+        .map_or(0, Duration::as_secs)
+}
 pub struct OathSession<'a> {
     version: &'a [u8],
     salt: &'a [u8],
@@ -66,7 +72,7 @@ fn clone_with_lifetime<'a>(data: &'a [u8]) -> Vec<u8> {
 }
 
 pub struct RefreshableOathCredential {
-    cred: OathCredential,
+    pub cred: OathCredential,
     pub code: Option<OathCodeDisplay>,
     pub valid_from: u64,
     pub valid_to: u64,
@@ -88,13 +94,6 @@ impl RefreshableOathCredential {
         self.code = code;
         (self.valid_from, self.valid_to) =
             RefreshableOathCredential::format_validity_time_frame(&self, timestamp);
-    }
-
-    fn time_to_u64(timestamp: SystemTime) -> u64 {
-        timestamp
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .as_ref()
-            .map_or(0, Duration::as_secs)
     }
 
     pub fn display(&self) -> String {
@@ -126,12 +125,12 @@ impl RefreshableOathCredential {
     }
 
     pub fn is_valid(&self) -> bool {
-        let current_time = RefreshableOathCredential::time_to_u64(SystemTime::now());
+        let current_time = time_to_u64(SystemTime::now());
         self.valid_from <= current_time && current_time <= self.valid_to
     }
 
     fn format_validity_time_frame(&self, timestamp: SystemTime) -> (u64, u64) {
-        let timestamp_seconds = RefreshableOathCredential::time_to_u64(timestamp);
+        let timestamp_seconds = time_to_u64(timestamp);
         match self.cred.id_data.oath_type {
             OathType::Totp => {
                 let time_step = timestamp_seconds / (self.cred.id_data.period as u64);
@@ -179,6 +178,41 @@ impl<'a> OathSession<'a> {
         self.version
     }
 
+    pub fn calculate_code(
+        &self,
+        cred: OathCredential,
+        timestamp_sys: Option<SystemTime>,
+    ) -> Result<OathCodeDisplay, String> {
+        if self.name != cred.device_id {
+            return Err("device id mismatch: Credential no on key".to_string());
+        }
+
+        let timestamp = time_to_u64(timestamp_sys.unwrap_or_else(SystemTime::now));
+
+        let mut data = to_tlv(Tag::Name, &cred.id_data.format_cred_id());
+
+        let extend = match cred.id_data.oath_type {
+            OathType::Totp => _get_challenge(timestamp, cred.id_data.period as u64).to_vec(),
+            OathType::Hotp => vec![],
+        };
+
+        data.extend(to_tlv(Tag::Challenge, &extend));
+
+        let resp = self.transaction_context.apdu_read_all(
+            0,
+            Instruction::Calculate as u8,
+            0,
+            0x01,
+            Some(&data),
+        );
+
+        let meta = TlvIter::from_vec(resp?)
+            .next()
+            .ok_or("No credentials to unpack found in response".to_string())?;
+
+        OathCodeDisplay::from_tlv(meta).ok_or("error parsing calculation response".to_string())
+    }
+
     /// Read the OATH codes from the device
     pub fn get_oath_codes(&self) -> Result<Vec<RefreshableOathCredential>, String> {
         let timestamp = SystemTime::now();
@@ -198,6 +232,9 @@ impl<'a> OathSession<'a> {
             let id_data = CredentialIDData::from_tlv(cred_id.value(), meta.tag());
             let code = OathCodeDisplay::from_tlv(meta);
 
+            /* println!("id bytes: {:?}", cred_id.value());
+            println!("id recon: {:?}", id_data.format_cred_id()); */
+
             let cred = OathCredential {
                 device_id: self.name.clone(),
                 id_data,
@@ -215,11 +252,5 @@ impl<'a> OathSession<'a> {
 }
 
 fn time_challenge(timestamp: Option<SystemTime>) -> [u8; 8] {
-    (timestamp
-        .unwrap_or_else(SystemTime::now)
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-        / 30)
-        .to_be_bytes()
+    (time_to_u64(timestamp.unwrap_or_else(SystemTime::now)) / 30).to_be_bytes()
 }

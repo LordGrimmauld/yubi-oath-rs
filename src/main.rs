@@ -51,7 +51,8 @@ fn main() {
 
         // Enumerate the OATH codes
         for oath in codes {
-            println!("Found OATH label: {}", oath.display());
+            let recalculated = session.calculate_code(oath.cred, None).unwrap();
+            println!("Found OATH label: {}", recalculated.display());
         }
     }
 }
