@@ -2,9 +2,11 @@
 
 mod lib_ykoath2;
 
+use core::time;
 use lib_ykoath2::OathSession;
 use pcsc;
 use std::process;
+use std::thread;
 // use crate::args::Cli;
 
 // use clap::Parser;
@@ -49,10 +51,12 @@ fn main() {
             println!("No credentials on device {}", device_label);
         }
 
+        thread::sleep(time::Duration::from_secs(45)); // show refresh is working
+
         // Enumerate the OATH codes
         for oath in codes {
-            let recalculated = session.calculate_code(oath.cred, None).unwrap();
-            println!("Found OATH label: {}", recalculated.display());
+            // let recalculated = session.calculate_code(oath.cred, None).unwrap();
+            println!("Found OATH label: {}", oath.get_or_refresh().display());
         }
     }
 }

@@ -71,22 +71,22 @@ fn clone_with_lifetime<'a>(data: &'a [u8]) -> Vec<u8> {
     data.to_vec() // `to_vec()` will return a Vec<u8> that has its own ownership
 }
 
-pub struct RefreshableOathCredential {
+pub struct RefreshableOathCredential<'a> {
     pub cred: OathCredential,
     pub code: Option<OathCodeDisplay>,
     pub valid_from: u64,
     pub valid_to: u64,
-    try_refresh_func: Option<Box<dyn Fn(OathCredential, SystemTime) -> Option<OathCodeDisplay>>>,
+    refresh_provider: &'a OathSession<'a>,
 }
 
-impl RefreshableOathCredential {
-    pub fn new(cred: OathCredential) -> Self {
+impl<'a> RefreshableOathCredential<'a> {
+    pub fn new(cred: OathCredential, refresh_provider: &'a OathSession<'a>) -> Self {
         RefreshableOathCredential {
             cred,
             code: None,
             valid_from: 0,
             valid_to: 0,
-            try_refresh_func: None,
+            refresh_provider,
         }
     }
 
@@ -109,15 +109,14 @@ impl RefreshableOathCredential {
 
     pub fn refresh(&mut self) {
         let timestamp = SystemTime::now();
-        let refresh_result = if let Some(refresh_func) = self.try_refresh_func.as_deref() {
-            refresh_func(self.cred.to_owned(), timestamp)
-        } else {
-            None
-        };
+        let refresh_result = self
+            .refresh_provider
+            .calculate_code(self.cred.to_owned(), Some(timestamp))
+            .ok();
         self.force_update(refresh_result, timestamp);
     }
 
-    pub fn get_or_refresh(mut self) -> RefreshableOathCredential {
+    pub fn get_or_refresh(mut self) -> RefreshableOathCredential<'a> {
         if !self.is_valid() {
             self.refresh();
         }
@@ -190,13 +189,12 @@ impl<'a> OathSession<'a> {
         let timestamp = time_to_u64(timestamp_sys.unwrap_or_else(SystemTime::now));
 
         let mut data = to_tlv(Tag::Name, &cred.id_data.format_cred_id());
-
-        let extend = match cred.id_data.oath_type {
-            OathType::Totp => _get_challenge(timestamp, cred.id_data.period as u64).to_vec(),
-            OathType::Hotp => vec![],
-        };
-
-        data.extend(to_tlv(Tag::Challenge, &extend));
+        if cred.id_data.oath_type == OathType::Totp {
+            data.extend(to_tlv(
+                Tag::Challenge,
+                &_get_challenge(timestamp, cred.id_data.period as u64),
+            ));
+        }
 
         let resp = self.transaction_context.apdu_read_all(
             0,
@@ -241,7 +239,7 @@ impl<'a> OathSession<'a> {
                 touch_required: touch,
             };
 
-            let mut refreshable_cred = RefreshableOathCredential::new(cred); // todo: refresh callback
+            let mut refreshable_cred = RefreshableOathCredential::new(cred, self);
             refreshable_cred.force_update(code, timestamp);
 
             key_buffer.push(refreshable_cred);
