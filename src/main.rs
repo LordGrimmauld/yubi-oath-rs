@@ -38,7 +38,11 @@ fn main() {
         println!("Found device with label {}", device_label);
         let session = OathSession::new(yubikey);
         println!("YubiKey version is {:?}", session.get_version());
-        let codes = match session.get_oath_codes() {
+        for c in session.list_oath_codes().unwrap() {
+            println!("{}", c);
+        }
+
+        let codes = match session.calculate_oath_codes() {
             Ok(codes) => codes,
             Err(e) => {
                 println!("ERROR {}", e);
@@ -51,12 +55,12 @@ fn main() {
             println!("No credentials on device {}", device_label);
         }
 
-        thread::sleep(time::Duration::from_secs(45)); // show refresh is working
+        thread::sleep(time::Duration::from_secs(5)); // show refresh is working
 
         // Enumerate the OATH codes
         for oath in codes {
             // let recalculated = session.calculate_code(oath.cred, None).unwrap();
-            println!("Found OATH label: {}", oath.get_or_refresh().display());
+            println!("Found OATH label: {}", oath.get_or_refresh());
         }
     }
 }

@@ -4,7 +4,10 @@ use crate::lib_ykoath2::*;
 extern crate pcsc;
 use regex::Regex;
 
-use std::str::{self};
+use std::{
+    fmt::Write,
+    str::{self},
+};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct CredentialIDData {
@@ -14,20 +17,18 @@ pub struct CredentialIDData {
     pub period: u32,
 }
 
+impl Display for CredentialIDData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(i) = self.issuer.clone() {
+            f.write_fmt(format_args!("{}: ", i))?;
+        }
+        f.write_str(&self.name)
+    }
+}
+
 impl CredentialIDData {
     pub fn from_tlv(id_bytes: &[u8], oath_type_tag: iso7816_tlv::simple::Tag) -> Self {
-        let oath_type = if Into::<u8>::into(oath_type_tag) == (Tag::Hotp as u8) {
-            OathType::Hotp
-        } else {
-            OathType::Totp
-        };
-        let (issuer, name, period) = CredentialIDData::parse_cred_id(id_bytes, oath_type);
-        return CredentialIDData {
-            issuer,
-            name,
-            period,
-            oath_type,
-        };
+        return CredentialIDData::from_bytes(id_bytes, Into::<u8>::into(oath_type_tag));
     }
 
     pub fn format_cred_id(&self) -> Vec<u8> {
@@ -70,20 +71,19 @@ impl CredentialIDData {
                 });
         }
     }
-}
 
-pub struct CredentialData {
-    id_data: CredentialIDData,
-    hash_algorithm: HashAlgo,
-    // secret: bytes,
-    digits: OathDigits, // = DEFAULT_DIGITS,
-    counter: u32,       // = DEFAULT_IMF,
-}
-
-impl CredentialData {
-    // TODO: parse_uri
-
-    pub fn get_id(&self) -> Vec<u8> {
-        return self.id_data.format_cred_id();
+    pub(crate) fn from_bytes(id_bytes: &[u8], tag: u8) -> CredentialIDData {
+        let oath_type = if tag == (Tag::Hotp as u8) {
+            OathType::Hotp
+        } else {
+            OathType::Totp
+        };
+        let (issuer, name, period) = CredentialIDData::parse_cred_id(id_bytes, oath_type);
+        return CredentialIDData {
+            issuer,
+            name,
+            period,
+            oath_type,
+        };
     }
 }

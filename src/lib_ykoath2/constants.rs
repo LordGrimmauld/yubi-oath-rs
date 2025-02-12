@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use iso7816_tlv::simple::Tlv;
 use sha1::{Digest, Sha1};
 use sha2::{Sha256, Sha512};
@@ -153,10 +155,16 @@ pub enum OathDigits {
     Eight = 8,
 }
 
-#[derive(Debug, PartialEq, Hash, Eq)]
+#[derive(Debug, PartialEq, Hash, Eq, Copy, Clone)]
 pub struct OathCodeDisplay {
     code: u32,
     digits: u8,
+}
+
+impl Display for OathCodeDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{:01$}", self.code, usize::from(self.digits)))
+    }
 }
 
 impl OathCodeDisplay {
@@ -182,9 +190,5 @@ impl OathCodeDisplay {
             digits: bytes[0],
             code: u32::from_be_bytes((&bytes[1..5]).try_into().unwrap()),
         }
-    }
-
-    pub fn display(&self) -> String {
-        format!("{:01$}", self.code, usize::from(self.digits))
     }
 }

@@ -12,6 +12,7 @@ use pbkdf2::pbkdf2_hmac_array;
 use sha1::Sha1;
 
 use std::{
+    fmt::Display,
     str::{self},
     time::Duration,
 };
@@ -79,6 +80,16 @@ pub struct RefreshableOathCredential<'a> {
     refresh_provider: &'a OathSession<'a>,
 }
 
+impl<'a> Display for RefreshableOathCredential<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(c) = self.code {
+            f.write_fmt(format_args!("{}: {}", self.cred.id_data, c))
+        } else {
+            f.write_fmt(format_args!("{}", self.cred.id_data))
+        }
+    }
+}
+
 impl<'a> RefreshableOathCredential<'a> {
     pub fn new(cred: OathCredential, refresh_provider: &'a OathSession<'a>) -> Self {
         RefreshableOathCredential {
@@ -94,17 +105,6 @@ impl<'a> RefreshableOathCredential<'a> {
         self.code = code;
         (self.valid_from, self.valid_to) =
             RefreshableOathCredential::format_validity_time_frame(&self, timestamp);
-    }
-
-    pub fn display(&self) -> String {
-        format!(
-            "{}: {}",
-            self.cred.id_data.name,
-            self.code
-                .as_ref()
-                .map(OathCodeDisplay::display)
-                .unwrap_or("".to_string())
-        )
     }
 
     pub fn refresh(&mut self) {
@@ -177,6 +177,19 @@ impl<'a> OathSession<'a> {
         self.version
     }
 
+    pub fn delete_code(
+        &self,
+        cred: OathCredential,
+    ) -> Result<ApduResponse, FormattableErrorResponse> {
+        self.transaction_context.apdu(
+            0,
+            Instruction::Delete as u8,
+            0,
+            0,
+            Some(&to_tlv(Tag::Name, &cred.id_data.format_cred_id())),
+        )
+    }
+
     pub fn calculate_code(
         &self,
         cred: OathCredential,
@@ -216,8 +229,8 @@ impl<'a> OathSession<'a> {
         ))
     }
 
-    /// Read the OATH codes from the device
-    pub fn get_oath_codes(
+    /// Read the OATH codes from the device, calculate TOTP codes that don't need touch
+    pub fn calculate_oath_codes(
         &self,
     ) -> Result<Vec<RefreshableOathCredential>, FormattableErrorResponse> {
         let timestamp = SystemTime::now();
@@ -250,6 +263,24 @@ impl<'a> OathSession<'a> {
             refreshable_cred.force_update(code, timestamp);
 
             key_buffer.push(refreshable_cred);
+        }
+
+        return Ok(key_buffer);
+    }
+    pub fn list_oath_codes(&self) -> Result<Vec<CredentialIDData>, FormattableErrorResponse> {
+        // Request OATH codes from device
+        let response =
+            self.transaction_context
+                .apdu_read_all(0, Instruction::List as u8, 0, 0, None);
+
+        let mut key_buffer = Vec::new();
+
+        for cred_id in TlvIter::from_vec(response?) {
+            let id_data = CredentialIDData::from_bytes(
+                &cred_id.value()[1..],
+                *cred_id.value().get(0).unwrap_or(&0u8) & 0xf0,
+            );
+            key_buffer.push(id_data);
         }
 
         return Ok(key_buffer);
