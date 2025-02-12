@@ -181,9 +181,9 @@ impl<'a> OathSession<'a> {
         &self,
         cred: OathCredential,
         timestamp_sys: Option<SystemTime>,
-    ) -> Result<OathCodeDisplay, String> {
+    ) -> Result<OathCodeDisplay, FormattableErrorResponse> {
         if self.name != cred.device_id {
-            return Err("device id mismatch: Credential no on key".to_string());
+            return Err(FormattableErrorResponse::DeviceMismatchError);
         }
 
         let timestamp = time_to_u64(timestamp_sys.unwrap_or_else(SystemTime::now));
@@ -204,15 +204,22 @@ impl<'a> OathSession<'a> {
             Some(&data),
         );
 
-        let meta = TlvIter::from_vec(resp?)
-            .next()
-            .ok_or("No credentials to unpack found in response".to_string())?;
+        let meta =
+            TlvIter::from_vec(resp?)
+                .next()
+                .ok_or(FormattableErrorResponse::ParsingError(
+                    "No credentials to unpack found in response".to_string(),
+                ))?;
 
-        OathCodeDisplay::from_tlv(meta).ok_or("error parsing calculation response".to_string())
+        OathCodeDisplay::from_tlv(meta).ok_or(FormattableErrorResponse::ParsingError(
+            "error parsing calculation response".to_string(),
+        ))
     }
 
     /// Read the OATH codes from the device
-    pub fn get_oath_codes(&self) -> Result<Vec<RefreshableOathCredential>, String> {
+    pub fn get_oath_codes(
+        &self,
+    ) -> Result<Vec<RefreshableOathCredential>, FormattableErrorResponse> {
         let timestamp = SystemTime::now();
         // Request OATH codes from device
         let response = self.transaction_context.apdu_read_all(

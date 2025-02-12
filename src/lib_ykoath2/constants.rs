@@ -1,7 +1,8 @@
 use iso7816_tlv::simple::Tlv;
-#[crate_type = "lib"]
 use sha1::{Digest, Sha1};
 use sha2::{Sha256, Sha512};
+use strum::IntoEnumIterator; // 0.17.1
+use strum_macros::EnumIter; // 0.17.1
 pub const INS_SELECT: u8 = 0xa4;
 pub const OATH_AID: [u8; 7] = [0xa0, 0x00, 0x00, 0x05, 0x27, 0x21, 0x01];
 
@@ -9,6 +10,7 @@ pub const DEFAULT_PERIOD: u32 = 30;
 pub const DEFAULT_DIGITS: OathDigits = OathDigits::Six;
 pub const DEFAULT_IMF: u32 = 0;
 
+#[derive(Debug, EnumIter, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum ErrorResponse {
     NoSpace = 0x6a84,
@@ -20,10 +22,46 @@ pub enum ErrorResponse {
     NoSuchObject = 0x6984,
 }
 
+impl ErrorResponse {
+    pub fn as_string(self) -> String {
+        match self {
+            ErrorResponse::NoSpace => "No Space left on device",
+            ErrorResponse::CommandAborted => "Command aborted",
+            ErrorResponse::InvalidInstruction => "Invalid instruction",
+            ErrorResponse::AuthRequired => "Authentication required",
+            ErrorResponse::WrongSyntax => "Wrong syntax",
+            ErrorResponse::GenericError => "Generic Error",
+            ErrorResponse::NoSuchObject => "No such Object",
+        }
+        .to_string()
+    }
+
+    pub fn any_match(code: u16) -> Option<ErrorResponse> {
+        for resp in ErrorResponse::iter() {
+            if code == resp as u16 {
+                return Some(resp);
+            }
+        }
+        None
+    }
+}
+
+#[derive(Debug, EnumIter, Clone, Copy)]
 #[repr(u16)]
 pub enum SuccessResponse {
     MoreData = 0x61,
     Okay = 0x9000,
+}
+
+impl SuccessResponse {
+    pub fn any_match(code: u16) -> Option<SuccessResponse> {
+        for resp in SuccessResponse::iter() {
+            if code == resp as u16 {
+                return Some(resp);
+            }
+        }
+        None
+    }
 }
 
 #[repr(u8)]

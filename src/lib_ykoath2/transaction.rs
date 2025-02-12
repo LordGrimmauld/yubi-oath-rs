@@ -5,6 +5,7 @@ extern crate pcsc;
 use iso7816_tlv::simple::{Tag as TlvTag, Tlv};
 use ouroboros::self_referencing;
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::str::{self};
 
 use apdu_core::{Command, Response};
@@ -12,6 +13,63 @@ use apdu_core::{Command, Response};
 use pcsc::{Card, Transaction};
 
 use std::ffi::CString;
+
+#[derive(PartialEq, Eq, Debug)]
+pub enum FormattableErrorResponse {
+    NoError,
+    Unknown(String),
+    Protocol(ErrorResponse),
+    PcscError(pcsc::Error),
+    ParsingError(String),
+    DeviceMismatchError,
+}
+
+impl FormattableErrorResponse {
+    pub fn from_apdu_response(sw1: u8, sw2: u8) -> FormattableErrorResponse {
+        let code: u16 = (sw1 as u16 | sw2 as u16) << 8;
+        if let Some(e) = ErrorResponse::any_match(code) {
+            return FormattableErrorResponse::Protocol(e);
+        }
+        if SuccessResponse::any_match(code)
+            .or(SuccessResponse::any_match(sw1.into()))
+            .is_some()
+        {
+            return FormattableErrorResponse::NoError;
+        }
+        FormattableErrorResponse::Unknown(String::from("Unknown error"))
+    }
+    pub fn is_ok(&self) -> bool {
+        *self == FormattableErrorResponse::NoError
+    }
+    pub fn as_opt(self) -> Option<FormattableErrorResponse> {
+        if self.is_ok() {
+            None
+        } else {
+            Some(self)
+        }
+    }
+
+    fn from_transmit(err: pcsc::Error) -> FormattableErrorResponse {
+        FormattableErrorResponse::PcscError(err)
+    }
+
+    fn as_string(&self) -> String {
+        match self {
+            FormattableErrorResponse::NoError => "ok".to_string(),
+            FormattableErrorResponse::Unknown(msg) => msg.to_owned(),
+            FormattableErrorResponse::Protocol(error_response) => error_response.as_string(),
+            FormattableErrorResponse::PcscError(error) => format!("{}", error),
+            FormattableErrorResponse::ParsingError(msg) => msg.to_owned(),
+            FormattableErrorResponse::DeviceMismatchError => "Devices do not match".to_string(),
+        }
+    }
+}
+
+impl Display for FormattableErrorResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.as_string())
+    }
+}
 
 pub struct ApduResponse {
     pub buf: Vec<u8>,
@@ -27,7 +85,7 @@ fn apdu(
     parameter1: u8,
     parameter2: u8,
     data: Option<&[u8]>,
-) -> Result<ApduResponse, String> {
+) -> Result<ApduResponse, FormattableErrorResponse> {
     let command = if let Some(data) = data {
         Command::new_with_payload(class, instruction, parameter1, parameter2, data)
     } else {
@@ -42,14 +100,16 @@ fn apdu(
     // Write the payload to the device and error if there is a problem
     let rx_buf = match tx.transmit(&tx_buf, &mut rx_buf) {
         Ok(slice) => slice,
-        Err(err) => return Err(format!("{}", err)),
+        // Err(err) => return Err(format!("{}", err)),
+        Err(err) => return Err(FormattableErrorResponse::from_transmit(err)),
     };
 
     let resp = Response::from(rx_buf);
-    let error_context = to_error_response(resp.trailer.0, resp.trailer.1);
+    let error_context =
+        FormattableErrorResponse::from_apdu_response(resp.trailer.0, resp.trailer.1);
 
-    if let Some(err) = error_context {
-        return Err(err);
+    if !error_context.is_ok() {
+        return Err(error_context);
     }
 
     Ok(ApduResponse {
@@ -66,7 +126,7 @@ fn apdu_read_all(
     parameter1: u8,
     parameter2: u8,
     data: Option<&[u8]>,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, FormattableErrorResponse> {
     let mut response_buf = Vec::new();
     let mut resp = apdu(tx, class, instruction, parameter1, parameter2, data)?;
     response_buf.extend(resp.buf);
@@ -75,31 +135,6 @@ fn apdu_read_all(
         response_buf.extend(resp.buf);
     }
     Ok(response_buf)
-}
-
-fn to_error_response(sw1: u8, sw2: u8) -> Option<String> {
-    let code: usize = (sw1 as usize | sw2 as usize) << 8;
-
-    match code {
-        code if code == ErrorResponse::GenericError as usize => Some(String::from("Generic error")),
-        code if code == ErrorResponse::NoSpace as usize => Some(String::from("No space on device")),
-        code if code == ErrorResponse::NoSuchObject as usize => {
-            Some(String::from("No such object"))
-        }
-        code if code == ErrorResponse::CommandAborted as usize => {
-            Some(String::from("Command was aborted"))
-        }
-        code if code == ErrorResponse::AuthRequired as usize => {
-            Some(String::from("Authentication required"))
-        }
-        code if code == ErrorResponse::WrongSyntax as usize => Some(String::from("Wrong syntax")),
-        code if code == ErrorResponse::InvalidInstruction as usize => {
-            Some(String::from("Invalid instruction"))
-        }
-        code if code == SuccessResponse::Okay as usize => None,
-        sw1 if sw1 == SuccessResponse::MoreData as usize => None,
-        _ => Some(String::from("Unknown error")),
-    }
 }
 
 #[self_referencing]
@@ -140,7 +175,7 @@ impl TransactionContext {
         parameter1: u8,
         parameter2: u8,
         data: Option<&[u8]>,
-    ) -> Result<ApduResponse, String> {
+    ) -> Result<ApduResponse, FormattableErrorResponse> {
         apdu(
             self.borrow_transaction(),
             class,
@@ -158,7 +193,7 @@ impl TransactionContext {
         parameter1: u8,
         parameter2: u8,
         data: Option<&[u8]>,
-    ) -> Result<Vec<u8>, String> {
+    ) -> Result<Vec<u8>, FormattableErrorResponse> {
         apdu_read_all(
             self.borrow_transaction(),
             class,
