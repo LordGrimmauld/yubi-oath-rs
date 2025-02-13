@@ -1,18 +1,15 @@
-#[crate_type = "lib"]
-use crate::lib_ykoath2::*;
-/// Utilities for interacting with YubiKey OATH/TOTP functionality
-extern crate pcsc;
 use iso7816_tlv::simple::{Tag as TlvTag, Tlv};
 use ouroboros::self_referencing;
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::str::{self};
 
 use apdu_core::{Command, Response};
 
 use pcsc::{Card, Transaction};
 
 use std::ffi::CString;
+
+use crate::lib_ykoath2::{ErrorResponse, Instruction, SuccessResponse, Tag};
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum FormattableErrorResponse {
