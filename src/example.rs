@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
-mod lib_ykoath2;
-
 use core::time;
 use lib_ykoath2::OathSession;
 use pcsc;

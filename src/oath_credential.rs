@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
-use crate::lib_ykoath2::CredentialIDData;
+use crate::CredentialIDData;
 
 #[derive(Debug, Clone)]
 pub struct OathCredential {

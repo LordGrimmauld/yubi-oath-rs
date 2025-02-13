@@ -2,7 +2,7 @@ use regex::Regex;
 
 use std::fmt::Display;
 
-use crate::lib_ykoath2::{OathType, Tag, DEFAULT_PERIOD};
+use crate::{OathType, Tag, DEFAULT_PERIOD};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct CredentialIDData {

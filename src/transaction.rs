@@ -9,7 +9,7 @@ use pcsc::{Card, Transaction};
 
 use std::ffi::CString;
 
-use crate::lib_ykoath2::{ErrorResponse, Instruction, SuccessResponse, Tag};
+use crate::{ErrorResponse, Instruction, SuccessResponse, Tag};
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum FormattableErrorResponse {
