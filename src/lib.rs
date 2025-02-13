@@ -7,15 +7,7 @@ mod oath_credentialid;
 use oath_credential::*;
 use oath_credentialid::*;
 /// Utilities for interacting with YubiKey OATH/TOTP functionality
-extern crate pcsc;
-use pbkdf2::pbkdf2_hmac_array;
-use sha1::Sha1;
-
-use std::{
-    fmt::Display,
-    str::{self},
-    time::Duration,
-};
+use std::{fmt::Display, time::Duration};
 
 use base64::{engine::general_purpose, Engine as _};
 use hmac::{Hmac, Mac};
@@ -32,13 +24,13 @@ fn _get_device_id(salt: Vec<u8>) -> String {
     return general_purpose::URL_SAFE_NO_PAD.encode(hash_16_bytes);
 }
 fn _hmac_sha1(key: &[u8], message: &[u8]) -> Vec<u8> {
-    let mut mac = Hmac::<Sha1>::new_from_slice(key).expect("Invalid key length");
+    let mut mac = Hmac::<sha1::Sha1>::new_from_slice(key).expect("Invalid key length");
     mac.update(message);
     mac.finalize().into_bytes().to_vec()
 }
 
 fn _derive_key(salt: &[u8], passphrase: &str) -> Vec<u8> {
-    pbkdf2_hmac_array::<Sha1, 16>(passphrase.as_bytes(), salt, 1000).to_vec()
+    pbkdf2::pbkdf2_hmac_array::<sha1::Sha1, 16>(passphrase.as_bytes(), salt, 1000).to_vec()
 }
 
 fn _hmac_shorten_key(key: &[u8], algo: HashAlgo) -> Vec<u8> {

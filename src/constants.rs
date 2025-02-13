@@ -1,8 +1,7 @@
 use std::fmt::Display;
 
 use iso7816_tlv::simple::Tlv;
-use sha1::{Digest, Sha1};
-use sha2::{Sha256, Sha512};
+use sha1::Digest;
 use strum::IntoEnumIterator; // 0.17.1
 use strum_macros::EnumIter; // 0.17.1
 pub const INS_SELECT: u8 = 0xa4;
@@ -114,18 +113,18 @@ impl HashAlgo {
     // returns a function capable of hashing a byte array
     pub fn get_hash_fun(&self) -> impl Fn(&[u8]) -> Vec<u8> {
         match self {
-            HashAlgo::Sha1 => |m: &[u8]| {
-                let mut hasher = Sha1::new();
+            Self::Sha1 => |m: &[u8]| {
+                let mut hasher = sha1::Sha1::new();
                 hasher.update(m);
                 hasher.finalize().to_vec()
             },
-            HashAlgo::Sha256 => |m: &[u8]| {
-                let mut hasher = Sha256::new();
+            Self::Sha256 => |m: &[u8]| {
+                let mut hasher = sha2::Sha256::new();
                 hasher.update(m);
                 hasher.finalize().to_vec()
             },
-            HashAlgo::Sha512 => |m: &[u8]| {
-                let mut hasher = Sha512::new();
+            Self::Sha512 => |m: &[u8]| {
+                let mut hasher = sha2::Sha512::new();
                 hasher.update(m);
                 hasher.finalize().to_vec()
             },
@@ -135,9 +134,9 @@ impl HashAlgo {
     // returns digest output size in number of bytes
     pub fn digest_size(&self) -> usize {
         match self {
-            HashAlgo::Sha1 => 20,
-            HashAlgo::Sha256 => 32,
-            HashAlgo::Sha512 => 64,
+            Self::Sha1 => 20,
+            Self::Sha256 => 32,
+            Self::Sha512 => 64,
         }
     }
 }
