@@ -133,11 +133,10 @@ impl<'a> RefreshableOathCredential<'a> {
 }
 
 impl<'a> OathSession<'a> {
-    pub fn new(name: &str) -> Result<Self, FormattableErrorResponse> {
+    pub fn new(name: &str) -> Result<Self, Error> {
         let transaction_context = TransactionContext::from_name(name)?;
-        let info_buffer = transaction_context
-            .apdu_read_all(0, INS_SELECT, 0x04, 0, Some(&OATH_AID))
-            .unwrap();
+        let info_buffer =
+            transaction_context.apdu_read_all(0, INS_SELECT, 0x04, 0, Some(&OATH_AID))?;
 
         let info_map = tlv_to_map(info_buffer);
         for (tag, data) in &info_map {
@@ -167,10 +166,7 @@ impl<'a> OathSession<'a> {
         self.version
     }
 
-    pub fn delete_code(
-        &self,
-        cred: OathCredential,
-    ) -> Result<ApduResponse, FormattableErrorResponse> {
+    pub fn delete_code(&self, cred: OathCredential) -> Result<ApduResponse, Error> {
         self.transaction_context.apdu(
             0,
             Instruction::Delete as u8,
@@ -184,9 +180,9 @@ impl<'a> OathSession<'a> {
         &self,
         cred: OathCredential,
         timestamp_sys: Option<SystemTime>,
-    ) -> Result<OathCodeDisplay, FormattableErrorResponse> {
+    ) -> Result<OathCodeDisplay, Error> {
         if self.name != cred.device_id {
-            return Err(FormattableErrorResponse::DeviceMismatchError);
+            return Err(Error::DeviceMismatchError);
         }
 
         let timestamp = time_to_u64(timestamp_sys.unwrap_or_else(SystemTime::now));
@@ -207,23 +203,18 @@ impl<'a> OathSession<'a> {
             Some(&data),
         );
 
-        let meta =
-            TlvIter::from_vec(resp?)
-                .next()
-                .ok_or(FormattableErrorResponse::ParsingError(
-                    "No credentials to unpack found in response".to_string(),
-                ))?;
+        let meta = TlvIter::from_vec(resp?).next().ok_or(Error::ParsingError(
+            "No credentials to unpack found in response".to_string(),
+        ))?;
 
-        OathCodeDisplay::from_tlv(meta).ok_or(FormattableErrorResponse::ParsingError(
+        OathCodeDisplay::from_tlv(meta).ok_or(Error::ParsingError(
             "error parsing calculation response".to_string(),
         ))
     }
 
     /// Read the OATH codes from the device, calculate TOTP codes that don't
     /// need touch
-    pub fn calculate_oath_codes(
-        &self,
-    ) -> Result<Vec<RefreshableOathCredential>, FormattableErrorResponse> {
+    pub fn calculate_oath_codes(&self) -> Result<Vec<RefreshableOathCredential>, Error> {
         let timestamp = SystemTime::now();
         // Request OATH codes from device
         let response = self.transaction_context.apdu_read_all(
@@ -258,7 +249,7 @@ impl<'a> OathSession<'a> {
 
         return Ok(key_buffer);
     }
-    pub fn list_oath_codes(&self) -> Result<Vec<CredentialIDData>, FormattableErrorResponse> {
+    pub fn list_oath_codes(&self) -> Result<Vec<CredentialIDData>, Error> {
         // Request OATH codes from device
         let response =
             self.transaction_context
