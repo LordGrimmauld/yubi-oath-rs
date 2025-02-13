@@ -31,6 +31,10 @@ impl CredentialIDData {
         return CredentialIDData::from_bytes(id_bytes, Into::<u8>::into(oath_type_tag));
     }
 
+    pub fn as_tlv(&self) -> Vec<u8> {
+        return to_tlv(Tag::Name, &self.format_cred_id());
+    }
+
     pub fn format_cred_id(&self) -> Vec<u8> {
         let mut cred_id = String::new();
 

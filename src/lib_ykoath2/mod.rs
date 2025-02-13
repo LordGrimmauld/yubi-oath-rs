@@ -177,6 +177,22 @@ impl<'a> OathSession<'a> {
         self.version
     }
 
+    pub fn rename_credential(
+        &self,
+        old: CredentialIDData,
+        new: CredentialIDData,
+    ) -> Result<CredentialIDData, FormattableErrorResponse> {
+        // require_version(self.version, (5, 3, 1)) TODO: version checking
+        self.transaction_context.apdu(
+            0,
+            Instruction::Rename as u8,
+            0,
+            0,
+            Some(&[old.as_tlv(), new.as_tlv()].concat()),
+        )?;
+        Ok(new)
+    }
+
     pub fn delete_code(
         &self,
         cred: OathCredential,
@@ -186,7 +202,7 @@ impl<'a> OathSession<'a> {
             Instruction::Delete as u8,
             0,
             0,
-            Some(&to_tlv(Tag::Name, &cred.id_data.format_cred_id())),
+            Some(&cred.id_data.as_tlv()),
         )
     }
 
@@ -201,7 +217,7 @@ impl<'a> OathSession<'a> {
 
         let timestamp = time_to_u64(timestamp_sys.unwrap_or_else(SystemTime::now));
 
-        let mut data = to_tlv(Tag::Name, &cred.id_data.format_cred_id());
+        let mut data = cred.id_data.as_tlv();
         if cred.id_data.oath_type == OathType::Totp {
             data.extend(to_tlv(
                 Tag::Challenge,
