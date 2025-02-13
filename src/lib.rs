@@ -6,7 +6,11 @@ use transaction::*;
 mod oath_credential;
 mod oath_credentialid;
 /// Utilities for interacting with YubiKey OATH/TOTP functionality
-use std::{fmt::Display, time::Duration, time::SystemTime};
+use std::{
+    fmt::Display,
+    ops::{Range, RangeInclusive},
+    time::{Duration, Instant, SystemTime},
+};
 
 use base64::{engine::general_purpose, Engine as _};
 use hmac::{Hmac, Mac};
@@ -40,16 +44,6 @@ fn _hmac_shorten_key(key: &[u8], algo: HashAlgo) -> Vec<u8> {
     }
 }
 
-fn _get_challenge(timestamp: u64, period: u64) -> [u8; 8] {
-    (timestamp / period).to_be_bytes()
-}
-
-fn time_to_u64(timestamp: SystemTime) -> u64 {
-    timestamp
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .as_ref()
-        .map_or(0, Duration::as_secs)
-}
 pub struct OathSession<'a> {
     version: &'a [u8],
     salt: &'a [u8],
@@ -66,8 +60,7 @@ fn clone_with_lifetime(data: &[u8]) -> Vec<u8> {
 pub struct RefreshableOathCredential<'a> {
     pub cred: OathCredential,
     pub code: Option<OathCodeDisplay>,
-    pub valid_from: u64,
-    pub valid_to: u64,
+    pub valid_timeframe: Range<SystemTime>,
     refresh_provider: &'a OathSession<'a>,
 }
 
@@ -86,15 +79,14 @@ impl<'a> RefreshableOathCredential<'a> {
         RefreshableOathCredential {
             cred,
             code: None,
-            valid_from: 0,
-            valid_to: 0,
+            valid_timeframe: SystemTime::UNIX_EPOCH..SystemTime::UNIX_EPOCH,
             refresh_provider,
         }
     }
 
     pub fn force_update(&mut self, code: Option<OathCodeDisplay>, timestamp: SystemTime) {
         self.code = code;
-        (self.valid_from, self.valid_to) =
+        self.valid_timeframe =
             RefreshableOathCredential::format_validity_time_frame(self, timestamp);
     }
 
@@ -115,20 +107,30 @@ impl<'a> RefreshableOathCredential<'a> {
     }
 
     pub fn is_valid(&self) -> bool {
-        let current_time = time_to_u64(SystemTime::now());
-        self.valid_from <= current_time && current_time <= self.valid_to
+        self.valid_timeframe.contains(&SystemTime::now())
     }
 
-    fn format_validity_time_frame(&self, timestamp: SystemTime) -> (u64, u64) {
-        let timestamp_seconds = time_to_u64(timestamp);
+    fn format_validity_time_frame(&self, timestamp: SystemTime) -> Range<SystemTime> {
         match self.cred.id_data.oath_type {
             OathType::Totp => {
-                let time_step = timestamp_seconds / (self.cred.id_data.period as u64);
-                let valid_from = time_step * (self.cred.id_data.period as u64);
-                let valid_to = (time_step + 1) * (self.cred.id_data.period as u64);
-                (valid_from, valid_to)
+                let timestamp_seconds = timestamp
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .as_ref()
+                    .map_or(0, Duration::as_secs);
+                let time_step = timestamp_seconds / (self.cred.id_data.period.as_secs());
+                let valid_from = SystemTime::UNIX_EPOCH
+                    .checked_add(self.cred.id_data.period.saturating_mul(time_step as u32))
+                    .unwrap();
+                // time_step * (self.cred.id_data.period.as_secs());
+                let valid_to = valid_from.checked_add(self.cred.id_data.period).unwrap();
+                valid_from..valid_to
             }
-            OathType::Hotp => (timestamp_seconds, 0x7FFFFFFFFFFFFFFF),
+            OathType::Hotp => {
+                timestamp
+                    ..SystemTime::UNIX_EPOCH
+                        .checked_add(Duration::from_secs(u64::MAX))
+                        .unwrap()
+            }
         }
     }
 }
@@ -146,18 +148,21 @@ impl OathSession<'_> {
         }
 
         Ok(Self {
-            version: clone_with_lifetime(
-                info_map.get(&(Tag::Version as u8)).unwrap_or(&vec![0u8; 0]),
-            )
-            .leak(),
-            salt: clone_with_lifetime(info_map.get(&(Tag::Name as u8)).unwrap_or(&vec![0u8; 0]))
+            version: info_map
+                .get(&(Tag::Version as u8))
+                .unwrap_or(&vec![0u8; 0])
+                .to_owned()
                 .leak(),
-            challenge: clone_with_lifetime(
-                info_map
-                    .get(&(Tag::Challenge as u8))
-                    .unwrap_or(&vec![0u8; 0]),
-            )
-            .leak(),
+            salt: info_map
+                .get(&(Tag::Name as u8))
+                .unwrap_or(&vec![0u8; 0])
+                .to_owned()
+                .leak(),
+            challenge: info_map
+                .get(&(Tag::Challenge as u8))
+                .unwrap_or(&vec![0u8; 0])
+                .to_owned()
+                .leak(),
             name: name.to_string(),
             transaction_context,
         })
@@ -202,13 +207,13 @@ impl OathSession<'_> {
             return Err(Error::DeviceMismatch);
         }
 
-        let timestamp = time_to_u64(timestamp_sys.unwrap_or_else(SystemTime::now));
+        let timestamp = timestamp_sys.unwrap_or_else(SystemTime::now);
 
         let mut data = cred.id_data.as_tlv();
         if cred.id_data.oath_type == OathType::Totp {
             data.extend(to_tlv(
                 Tag::Challenge,
-                &_get_challenge(timestamp, cred.id_data.period as u64),
+                &time_challenge(Some(timestamp), Some(cred.id_data.period)),
             ));
         }
 
@@ -239,7 +244,10 @@ impl OathSession<'_> {
             Instruction::CalculateAll as u8,
             0,
             0x01,
-            Some(&to_tlv(Tag::Challenge, &time_challenge(Some(timestamp)))),
+            Some(&to_tlv(
+                Tag::Challenge,
+                &time_challenge(Some(timestamp), None),
+            )),
         );
 
         let mut key_buffer = Vec::new();
@@ -286,6 +294,12 @@ impl OathSession<'_> {
     }
 }
 
-fn time_challenge(timestamp: Option<SystemTime>) -> [u8; 8] {
-    (time_to_u64(timestamp.unwrap_or_else(SystemTime::now)) / 30).to_be_bytes()
+fn time_challenge(timestamp: Option<SystemTime>, period: Option<Duration>) -> [u8; 8] {
+    (timestamp
+        .unwrap_or_else(SystemTime::now)
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .as_ref()
+        .map_or(0, Duration::as_secs)
+        / period.unwrap_or(DEFAULT_PERIOD).as_secs())
+    .to_be_bytes()
 }

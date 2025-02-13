@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, time::Duration};
 
 use regex::Regex;
 
@@ -9,7 +9,7 @@ pub struct CredentialIDData {
     pub name: String,
     pub oath_type: OathType,
     pub issuer: Option<String>,
-    pub period: u32,
+    pub period: Duration,
 }
 
 impl Display for CredentialIDData {
@@ -34,7 +34,7 @@ impl CredentialIDData {
         let mut cred_id = String::new();
 
         if self.oath_type == OathType::Totp && self.period != DEFAULT_PERIOD {
-            cred_id.push_str(&format!("{}/", self.period));
+            cred_id.push_str(&format!("{}/", self.period.as_secs()));
         }
 
         if let Some(issuer) = self.issuer.as_deref() {
@@ -46,10 +46,10 @@ impl CredentialIDData {
     }
 
     // Function to parse the credential ID
-    fn parse_cred_id(cred_id: &[u8], oath_type: OathType) -> (Option<String>, String, u32) {
+    fn parse_cred_id(cred_id: &[u8], oath_type: OathType) -> (Option<String>, String, Duration) {
         let data = match std::str::from_utf8(cred_id) {
             Ok(d) => d,
-            Err(_) => return (None, String::new(), 0), // Handle invalid UTF-8
+            Err(_) => return (None, String::new(), Duration::ZERO), // Handle invalid UTF-8
         };
 
         if oath_type == OathType::Totp {
@@ -60,13 +60,14 @@ impl CredentialIDData {
                     let period = caps
                         .get(2)
                         .and_then(|s| s.as_str().parse::<u32>().ok())
+                        .map(|t| Duration::from_secs(t as u64))
                         .unwrap_or(DEFAULT_PERIOD);
                     (Some(caps[4].to_string()), caps[5].to_string(), period)
                 })
         } else {
             data.split_once(':')
-                .map_or((None, data.to_string(), 0), |(i, n)| {
-                    (Some(i.to_string()), n.to_string(), 0)
+                .map_or((None, data.to_string(), Duration::ZERO), |(i, n)| {
+                    (Some(i.to_string()), n.to_string(), Duration::ZERO)
                 })
         }
     }

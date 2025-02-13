@@ -1,11 +1,11 @@
-use std::fmt::Display;
+use std::{fmt::Display, time::Duration};
 
 use iso7816_tlv::simple::Tlv;
 use sha1::Digest;
 pub const INS_SELECT: u8 = 0xa4;
 pub const OATH_AID: [u8; 7] = [0xa0, 0x00, 0x00, 0x05, 0x27, 0x21, 0x01];
 
-pub const DEFAULT_PERIOD: u32 = 30;
+pub const DEFAULT_PERIOD: Duration = Duration::from_secs(30);
 pub const DEFAULT_DIGITS: OathDigits = OathDigits::Six;
 pub const DEFAULT_IMF: u32 = 0;
 
