@@ -1,3 +1,4 @@
+#![allow(unused)]
 mod constants;
 use constants::*;
 mod transaction;
