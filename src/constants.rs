@@ -188,14 +188,6 @@ impl OathCodeDisplay {
             None
         }
     }
-    pub fn from_bytes(tlv: Tlv) -> Option<Self> {
-        if Into::<u8>::into(tlv.tag()) == (Tag::TruncatedResponse as u8) && tlv.value().len() == 5 {
-            let display = OathCodeDisplay::new(tlv.value()[..].try_into().unwrap());
-            Some(display)
-        } else {
-            None
-        }
-    }
 
     pub fn new(bytes: &[u8; 5]) -> Self {
         Self {
