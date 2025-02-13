@@ -1,22 +1,14 @@
-#[crate_type = "lib"]
-use crate::lib_ykoath2::*;
-/// Utilities for interacting with YubiKey OATH/TOTP functionality
-extern crate pcsc;
-use iso7816_tlv::simple::{Tag as TlvTag, Tlv};
-use ouroboros::self_referencing;
-use std::collections::HashMap;
-use std::fmt::Display;
-use std::str::{self};
+use std::{collections::HashMap, ffi::CString, fmt::Display};
 
 use apdu_core::{Command, Response};
-
+use iso7816_tlv::simple::{Tag as TlvTag, Tlv};
+use ouroboros::self_referencing;
 use pcsc::{Card, Transaction};
 
-use std::ffi::CString;
+use crate::{ErrorResponse, Instruction, SuccessResponse, Tag};
 
 #[derive(PartialEq, Eq, Debug)]
-pub enum FormattableErrorResponse {
-    NoError,
+pub enum Error {
     Unknown(String),
     Protocol(ErrorResponse),
     PcscError(pcsc::Error),
@@ -24,50 +16,37 @@ pub enum FormattableErrorResponse {
     DeviceMismatchError,
 }
 
-impl FormattableErrorResponse {
-    pub fn from_apdu_response(sw1: u8, sw2: u8) -> FormattableErrorResponse {
+impl Error {
+    fn from_apdu_response(sw1: u8, sw2: u8) -> Result<(), Self> {
         let code: u16 = (sw1 as u16 | sw2 as u16) << 8;
         if let Some(e) = ErrorResponse::any_match(code) {
-            return FormattableErrorResponse::Protocol(e);
+            return Err(Self::Protocol(e));
         }
         if SuccessResponse::any_match(code)
             .or(SuccessResponse::any_match(sw1.into()))
             .is_some()
         {
-            return FormattableErrorResponse::NoError;
+            return Ok(());
         }
-        FormattableErrorResponse::Unknown(String::from("Unknown error"))
-    }
-    pub fn is_ok(&self) -> bool {
-        *self == FormattableErrorResponse::NoError
-    }
-    pub fn as_opt(self) -> Option<FormattableErrorResponse> {
-        if self.is_ok() {
-            None
-        } else {
-            Some(self)
-        }
-    }
-
-    fn from_transmit(err: pcsc::Error) -> FormattableErrorResponse {
-        FormattableErrorResponse::PcscError(err)
-    }
-
-    fn as_string(&self) -> String {
-        match self {
-            FormattableErrorResponse::NoError => "ok".to_string(),
-            FormattableErrorResponse::Unknown(msg) => msg.to_owned(),
-            FormattableErrorResponse::Protocol(error_response) => error_response.as_string(),
-            FormattableErrorResponse::PcscError(error) => format!("{}", error),
-            FormattableErrorResponse::ParsingError(msg) => msg.to_owned(),
-            FormattableErrorResponse::DeviceMismatchError => "Devices do not match".to_string(),
-        }
+        Err(Self::Unknown(String::from("Unknown error")))
     }
 }
 
-impl Display for FormattableErrorResponse {
+impl From<pcsc::Error> for Error {
+    fn from(value: pcsc::Error) -> Self {
+        Self::PcscError(value)
+    }
+}
+
+impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.as_string())
+        match self {
+            Self::Unknown(msg) => f.write_str(msg),
+            Self::Protocol(error_response) => f.write_fmt(format_args!("{}", error_response)),
+            Self::PcscError(error) => f.write_fmt(format_args!("{}", error)),
+            Self::ParsingError(msg) => f.write_str(msg),
+            Self::DeviceMismatchError => f.write_str("Devices do not match"),
+        }
     }
 }
 
@@ -85,7 +64,7 @@ fn apdu(
     parameter1: u8,
     parameter2: u8,
     data: Option<&[u8]>,
-) -> Result<ApduResponse, FormattableErrorResponse> {
+) -> Result<ApduResponse, Error> {
     let command = if let Some(data) = data {
         Command::new_with_payload(class, instruction, parameter1, parameter2, data)
     } else {
@@ -98,19 +77,9 @@ fn apdu(
     let mut rx_buf = [0; pcsc::MAX_BUFFER_SIZE];
 
     // Write the payload to the device and error if there is a problem
-    let rx_buf = match tx.transmit(&tx_buf, &mut rx_buf) {
-        Ok(slice) => slice,
-        // Err(err) => return Err(format!("{}", err)),
-        Err(err) => return Err(FormattableErrorResponse::from_transmit(err)),
-    };
-
+    let rx_buf = tx.transmit(&tx_buf, &mut rx_buf)?;
     let resp = Response::from(rx_buf);
-    let error_context =
-        FormattableErrorResponse::from_apdu_response(resp.trailer.0, resp.trailer.1);
-
-    if !error_context.is_ok() {
-        return Err(error_context);
-    }
+    Error::from_apdu_response(resp.trailer.0, resp.trailer.1)?;
 
     Ok(ApduResponse {
         buf: resp.payload.to_vec(),
@@ -126,7 +95,7 @@ fn apdu_read_all(
     parameter1: u8,
     parameter2: u8,
     data: Option<&[u8]>,
-) -> Result<Vec<u8>, FormattableErrorResponse> {
+) -> Result<Vec<u8>, Error> {
     let mut response_buf = Vec::new();
     let mut resp = apdu(tx, class, instruction, parameter1, parameter2, data)?;
     response_buf.extend(resp.buf);
@@ -146,26 +115,22 @@ pub struct TransactionContext {
 }
 
 impl TransactionContext {
-    pub fn from_name(name: &str) -> Self {
-        // FIXME: error handling here
-
+    pub fn from_name(name: &str) -> Result<Self, Error> {
         // Establish a PC/SC context
-        let ctx = pcsc::Context::establish(pcsc::Scope::User).unwrap();
+        let ctx = pcsc::Context::establish(pcsc::Scope::User)?;
 
         // Connect to the card
-        let card = ctx
-            .connect(
-                &CString::new(name).unwrap(),
-                pcsc::ShareMode::Shared,
-                pcsc::Protocols::ANY,
-            )
-            .unwrap();
+        let card = ctx.connect(
+            &CString::new(name).unwrap(),
+            pcsc::ShareMode::Shared,
+            pcsc::Protocols::ANY,
+        )?;
 
-        TransactionContextBuilder {
+        Ok(TransactionContextBuilder {
             card,
             transaction_builder: |c| c.transaction().unwrap(),
         }
-        .build()
+        .build())
     }
 
     pub fn apdu(
@@ -175,7 +140,7 @@ impl TransactionContext {
         parameter1: u8,
         parameter2: u8,
         data: Option<&[u8]>,
-    ) -> Result<ApduResponse, FormattableErrorResponse> {
+    ) -> Result<ApduResponse, Error> {
         apdu(
             self.borrow_transaction(),
             class,
@@ -193,7 +158,7 @@ impl TransactionContext {
         parameter1: u8,
         parameter2: u8,
         data: Option<&[u8]>,
-    ) -> Result<Vec<u8>, FormattableErrorResponse> {
+    ) -> Result<Vec<u8>, Error> {
         apdu_read_all(
             self.borrow_transaction(),
             class,

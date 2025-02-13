@@ -4,23 +4,13 @@ mod transaction;
 use transaction::*;
 mod oath_credential;
 mod oath_credentialid;
-use oath_credential::*;
-use oath_credentialid::*;
 /// Utilities for interacting with YubiKey OATH/TOTP functionality
-extern crate pcsc;
-use pbkdf2::pbkdf2_hmac_array;
-use sha1::Sha1;
-
-use std::{
-    fmt::Display,
-    str::{self},
-    time::Duration,
-};
+use std::{fmt::Display, time::Duration, time::SystemTime};
 
 use base64::{engine::general_purpose, Engine as _};
 use hmac::{Hmac, Mac};
-
-use std::time::SystemTime;
+use oath_credential::*;
+use oath_credentialid::*;
 
 fn _get_device_id(salt: Vec<u8>) -> String {
     let result = HashAlgo::Sha256.get_hash_fun()(salt.leak());
@@ -32,13 +22,13 @@ fn _get_device_id(salt: Vec<u8>) -> String {
     return general_purpose::URL_SAFE_NO_PAD.encode(hash_16_bytes);
 }
 fn _hmac_sha1(key: &[u8], message: &[u8]) -> Vec<u8> {
-    let mut mac = Hmac::<Sha1>::new_from_slice(key).expect("Invalid key length");
+    let mut mac = Hmac::<sha1::Sha1>::new_from_slice(key).expect("Invalid key length");
     mac.update(message);
     mac.finalize().into_bytes().to_vec()
 }
 
 fn _derive_key(salt: &[u8], passphrase: &str) -> Vec<u8> {
-    pbkdf2_hmac_array::<Sha1, 16>(passphrase.as_bytes(), salt, 1000).to_vec()
+    pbkdf2::pbkdf2_hmac_array::<sha1::Sha1, 16>(passphrase.as_bytes(), salt, 1000).to_vec()
 }
 
 fn _hmac_shorten_key(key: &[u8], algo: HashAlgo) -> Vec<u8> {
@@ -143,11 +133,10 @@ impl<'a> RefreshableOathCredential<'a> {
 }
 
 impl<'a> OathSession<'a> {
-    pub fn new(name: &str) -> Self {
-        let transaction_context = TransactionContext::from_name(name);
-        let info_buffer = transaction_context
-            .apdu_read_all(0, INS_SELECT, 0x04, 0, Some(&OATH_AID))
-            .unwrap();
+    pub fn new(name: &str) -> Result<Self, Error> {
+        let transaction_context = TransactionContext::from_name(name)?;
+        let info_buffer =
+            transaction_context.apdu_read_all(0, INS_SELECT, 0x04, 0, Some(&OATH_AID))?;
 
         let info_map = tlv_to_map(info_buffer);
         for (tag, data) in &info_map {
@@ -155,7 +144,7 @@ impl<'a> OathSession<'a> {
             println!("{:?}: {:?}", tag, data);
         }
 
-        OathSession {
+        Ok(Self {
             version: clone_with_lifetime(
                 info_map.get(&(Tag::Version as u8)).unwrap_or(&vec![0u8; 0]),
             )
@@ -170,17 +159,14 @@ impl<'a> OathSession<'a> {
             .leak(),
             name: name.to_string(),
             transaction_context,
-        }
+        })
     }
 
     pub fn get_version(&self) -> &[u8] {
         self.version
     }
 
-    pub fn delete_code(
-        &self,
-        cred: OathCredential,
-    ) -> Result<ApduResponse, FormattableErrorResponse> {
+    pub fn delete_code(&self, cred: OathCredential) -> Result<ApduResponse, Error> {
         self.transaction_context.apdu(
             0,
             Instruction::Delete as u8,
@@ -194,9 +180,9 @@ impl<'a> OathSession<'a> {
         &self,
         cred: OathCredential,
         timestamp_sys: Option<SystemTime>,
-    ) -> Result<OathCodeDisplay, FormattableErrorResponse> {
+    ) -> Result<OathCodeDisplay, Error> {
         if self.name != cred.device_id {
-            return Err(FormattableErrorResponse::DeviceMismatchError);
+            return Err(Error::DeviceMismatchError);
         }
 
         let timestamp = time_to_u64(timestamp_sys.unwrap_or_else(SystemTime::now));
@@ -217,22 +203,18 @@ impl<'a> OathSession<'a> {
             Some(&data),
         );
 
-        let meta =
-            TlvIter::from_vec(resp?)
-                .next()
-                .ok_or(FormattableErrorResponse::ParsingError(
-                    "No credentials to unpack found in response".to_string(),
-                ))?;
+        let meta = TlvIter::from_vec(resp?).next().ok_or(Error::ParsingError(
+            "No credentials to unpack found in response".to_string(),
+        ))?;
 
-        OathCodeDisplay::from_tlv(meta).ok_or(FormattableErrorResponse::ParsingError(
+        OathCodeDisplay::from_tlv(meta).ok_or(Error::ParsingError(
             "error parsing calculation response".to_string(),
         ))
     }
 
-    /// Read the OATH codes from the device, calculate TOTP codes that don't need touch
-    pub fn calculate_oath_codes(
-        &self,
-    ) -> Result<Vec<RefreshableOathCredential>, FormattableErrorResponse> {
+    /// Read the OATH codes from the device, calculate TOTP codes that don't
+    /// need touch
+    pub fn calculate_oath_codes(&self) -> Result<Vec<RefreshableOathCredential>, Error> {
         let timestamp = SystemTime::now();
         // Request OATH codes from device
         let response = self.transaction_context.apdu_read_all(
@@ -250,8 +232,8 @@ impl<'a> OathSession<'a> {
             let id_data = CredentialIDData::from_tlv(cred_id.value(), meta.tag());
             let code = OathCodeDisplay::from_tlv(meta);
 
-            /* println!("id bytes: {:?}", cred_id.value());
-            println!("id recon: {:?}", id_data.format_cred_id()); */
+            // println!("id bytes: {:?}", cred_id.value());
+            // println!("id recon: {:?}", id_data.format_cred_id());
 
             let cred = OathCredential {
                 device_id: self.name.clone(),
@@ -267,7 +249,7 @@ impl<'a> OathSession<'a> {
 
         return Ok(key_buffer);
     }
-    pub fn list_oath_codes(&self) -> Result<Vec<CredentialIDData>, FormattableErrorResponse> {
+    pub fn list_oath_codes(&self) -> Result<Vec<CredentialIDData>, Error> {
         // Request OATH codes from device
         let response =
             self.transaction_context
