@@ -44,24 +44,19 @@ fn _hmac_shorten_key(key: &[u8], algo: HashAlgo) -> Vec<u8> {
     }
 }
 
-pub struct OathSession<'a> {
-    version: &'a [u8],
-    salt: &'a [u8],
-    challenge: &'a [u8],
+pub struct OathSession {
+    version: Vec<u8>,
+    salt: Vec<u8>,
+    challenge: Vec<u8>,
     transaction_context: TransactionContext,
     pub name: String,
-}
-
-fn clone_with_lifetime(data: &[u8]) -> Vec<u8> {
-    // Clone the slice into a new Vec<u8>
-    data.to_vec() // `to_vec()` will return a Vec<u8> that has its own ownership
 }
 
 pub struct RefreshableOathCredential<'a> {
     pub cred: OathCredential,
     pub code: Option<OathCodeDisplay>,
     pub valid_timeframe: Range<SystemTime>,
-    refresh_provider: &'a OathSession<'a>,
+    refresh_provider: &'a OathSession,
 }
 
 impl Display for RefreshableOathCredential<'_> {
@@ -75,7 +70,7 @@ impl Display for RefreshableOathCredential<'_> {
 }
 
 impl<'a> RefreshableOathCredential<'a> {
-    pub fn new(cred: OathCredential, refresh_provider: &'a OathSession<'a>) -> Self {
+    pub fn new(cred: OathCredential, refresh_provider: &'a OathSession) -> Self {
         RefreshableOathCredential {
             cred,
             code: None,
@@ -135,7 +130,7 @@ impl<'a> RefreshableOathCredential<'a> {
     }
 }
 
-impl OathSession<'_> {
+impl OathSession {
     pub fn new(name: &str) -> Result<Self, Error> {
         let transaction_context = TransactionContext::from_name(name)?;
         let info_buffer =
@@ -151,25 +146,22 @@ impl OathSession<'_> {
             version: info_map
                 .get(&(Tag::Version as u8))
                 .unwrap_or(&vec![0u8; 0])
-                .to_owned()
-                .leak(),
+                .to_owned(),
             salt: info_map
                 .get(&(Tag::Name as u8))
                 .unwrap_or(&vec![0u8; 0])
-                .to_owned()
-                .leak(),
+                .to_owned(),
             challenge: info_map
                 .get(&(Tag::Challenge as u8))
                 .unwrap_or(&vec![0u8; 0])
-                .to_owned()
-                .leak(),
+                .to_owned(),
             name: name.to_string(),
             transaction_context,
         })
     }
 
     pub fn get_version(&self) -> &[u8] {
-        self.version
+        &self.version
     }
 
     pub fn rename_credential(

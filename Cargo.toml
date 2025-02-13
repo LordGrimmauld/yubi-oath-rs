@@ -4,11 +4,15 @@ base64 = "0.22.1"
 hmac = "0.12.1"
 iso7816-tlv = "0.4.4"
 ouroboros = "0.18.5"
-pbkdf2 = { version = "0.12.2", features = ["sha1"] }
+pbkdf2 = {version = "0.12.2", features = ["sha1"]}
 pcsc = "2.9.0"
 regex = "1.11.1"
 sha1 = "0.10.6"
 sha2 = "0.10.8"
+
+[[example]]
+name = "example"
+path = "./src/example.rs"
 
 [package]
 name = "lib_ykoath2"
@@ -17,7 +21,3 @@ edition = "2021"
 authors = ["Grimmauld <grimmauld@grimmauld.de>"]
 description = "experiments with smartcards"
 license-file = "LICENSE"
-
-[[example]]
-name = "example"
-path = "./src/example.rs"
