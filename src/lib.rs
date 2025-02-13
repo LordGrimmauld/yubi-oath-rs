@@ -20,7 +20,7 @@ fn _get_device_id(salt: Vec<u8>) -> String {
     let hash_16_bytes = &result[..16];
 
     // Base64 encode the result and remove padding ('=')
-    return general_purpose::URL_SAFE_NO_PAD.encode(hash_16_bytes);
+    general_purpose::URL_SAFE_NO_PAD.encode(hash_16_bytes)
 }
 fn _hmac_sha1(key: &[u8], message: &[u8]) -> Vec<u8> {
     let mut mac = Hmac::<sha1::Sha1>::new_from_slice(key).expect("Invalid key length");
@@ -41,7 +41,7 @@ fn _hmac_shorten_key(key: &[u8], algo: HashAlgo) -> Vec<u8> {
 }
 
 fn _get_challenge(timestamp: u64, period: u64) -> [u8; 8] {
-    return ((timestamp / period) as u64).to_be_bytes();
+    (timestamp / period).to_be_bytes()
 }
 
 fn time_to_u64(timestamp: SystemTime) -> u64 {
@@ -58,7 +58,7 @@ pub struct OathSession<'a> {
     pub name: String,
 }
 
-fn clone_with_lifetime<'a>(data: &'a [u8]) -> Vec<u8> {
+fn clone_with_lifetime(data: &[u8]) -> Vec<u8> {
     // Clone the slice into a new Vec<u8>
     data.to_vec() // `to_vec()` will return a Vec<u8> that has its own ownership
 }
@@ -71,7 +71,7 @@ pub struct RefreshableOathCredential<'a> {
     refresh_provider: &'a OathSession<'a>,
 }
 
-impl<'a> Display for RefreshableOathCredential<'a> {
+impl Display for RefreshableOathCredential<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(c) = self.code {
             f.write_fmt(format_args!("{}: {}", self.cred.id_data, c))
@@ -95,7 +95,7 @@ impl<'a> RefreshableOathCredential<'a> {
     pub fn force_update(&mut self, code: Option<OathCodeDisplay>, timestamp: SystemTime) {
         self.code = code;
         (self.valid_from, self.valid_to) =
-            RefreshableOathCredential::format_validity_time_frame(&self, timestamp);
+            RefreshableOathCredential::format_validity_time_frame(self, timestamp);
     }
 
     pub fn refresh(&mut self) {
@@ -111,7 +111,7 @@ impl<'a> RefreshableOathCredential<'a> {
         if !self.is_valid() {
             self.refresh();
         }
-        return self;
+        self
     }
 
     pub fn is_valid(&self) -> bool {
@@ -133,7 +133,7 @@ impl<'a> RefreshableOathCredential<'a> {
     }
 }
 
-impl<'a> OathSession<'a> {
+impl OathSession<'_> {
     pub fn new(name: &str) -> Result<Self, Error> {
         let transaction_context = TransactionContext::from_name(name)?;
         let info_buffer =
@@ -199,7 +199,7 @@ impl<'a> OathSession<'a> {
         timestamp_sys: Option<SystemTime>,
     ) -> Result<OathCodeDisplay, Error> {
         if self.name != cred.device_id {
-            return Err(Error::DeviceMismatchError);
+            return Err(Error::DeviceMismatch);
         }
 
         let timestamp = time_to_u64(timestamp_sys.unwrap_or_else(SystemTime::now));
@@ -220,11 +220,11 @@ impl<'a> OathSession<'a> {
             Some(&data),
         );
 
-        let meta = TlvIter::from_vec(resp?).next().ok_or(Error::ParsingError(
+        let meta = TlvIter::from_vec(resp?).next().ok_or(Error::Parsing(
             "No credentials to unpack found in response".to_string(),
         ))?;
 
-        OathCodeDisplay::from_tlv(meta).ok_or(Error::ParsingError(
+        OathCodeDisplay::from_tlv(meta).ok_or(Error::Parsing(
             "error parsing calculation response".to_string(),
         ))
     }
@@ -264,7 +264,7 @@ impl<'a> OathSession<'a> {
             key_buffer.push(refreshable_cred);
         }
 
-        return Ok(key_buffer);
+        Ok(key_buffer)
     }
     pub fn list_oath_codes(&self) -> Result<Vec<CredentialIDData>, Error> {
         // Request OATH codes from device
@@ -277,12 +277,12 @@ impl<'a> OathSession<'a> {
         for cred_id in TlvIter::from_vec(response?) {
             let id_data = CredentialIDData::from_bytes(
                 &cred_id.value()[1..],
-                *cred_id.value().get(0).unwrap_or(&0u8) & 0xf0,
+                *cred_id.value().first().unwrap_or(&0u8) & 0xf0,
             );
             key_buffer.push(id_data);
         }
 
-        return Ok(key_buffer);
+        Ok(key_buffer)
     }
 }
 

@@ -21,7 +21,7 @@ fn main() {
     }
 
     // Show message if no YubiKey(s)
-    if yubikeys.len() == 0 {
+    if yubikeys.is_empty() {
         println!("No yubikeys detected");
         std::process::exit(0);
     }
@@ -45,7 +45,7 @@ fn main() {
         };
 
         // Show message is node codes found
-        if codes.len() == 0 {
+        if codes.is_empty() {
             println!("No credentials on device {}", device_label);
         }
 
