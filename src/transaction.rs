@@ -50,6 +50,8 @@ impl Display for Error {
     }
 }
 
+impl std::error::Error for Error {}
+
 pub struct ApduResponse {
     pub buf: Vec<u8>,
     pub sw1: u8,
