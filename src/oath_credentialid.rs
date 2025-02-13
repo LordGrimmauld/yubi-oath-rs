@@ -23,11 +23,11 @@ impl Display for CredentialIDData {
 
 impl CredentialIDData {
     pub fn from_tlv(id_bytes: &[u8], oath_type_tag: iso7816_tlv::simple::Tag) -> Self {
-        return CredentialIDData::from_bytes(id_bytes, Into::<u8>::into(oath_type_tag));
+        CredentialIDData::from_bytes(id_bytes, Into::<u8>::into(oath_type_tag))
     }
 
     pub fn as_tlv(&self) -> Vec<u8> {
-        return to_tlv(Tag::Name, &self.format_cred_id());
+        to_tlv(Tag::Name, &self.format_cred_id())
     }
 
     pub fn format_cred_id(&self) -> Vec<u8> {
@@ -42,7 +42,7 @@ impl CredentialIDData {
         }
 
         cred_id.push_str(self.name.as_str());
-        return cred_id.into_bytes(); // Convert the string to bytes
+        cred_id.into_bytes() // Convert the string to bytes
     }
 
     // Function to parse the credential ID
@@ -55,19 +55,19 @@ impl CredentialIDData {
         if oath_type == OathType::Totp {
             Regex::new(r"^((\d+)/)?(([^:]+):)?(.+)$")
                 .ok()
-                .and_then(|r| r.captures(&data))
+                .and_then(|r| r.captures(data))
                 .map_or((None, data.to_string(), DEFAULT_PERIOD), |caps| {
-                    let period = (&caps.get(2))
+                    let period = caps
+                        .get(2)
                         .and_then(|s| s.as_str().parse::<u32>().ok())
                         .unwrap_or(DEFAULT_PERIOD);
-                    return (Some(caps[4].to_string()), caps[5].to_string(), period);
+                    (Some(caps[4].to_string()), caps[5].to_string(), period)
                 })
         } else {
-            return data
-                .split_once(':')
+            data.split_once(':')
                 .map_or((None, data.to_string(), 0), |(i, n)| {
                     (Some(i.to_string()), n.to_string(), 0)
-                });
+                })
         }
     }
 
@@ -78,11 +78,11 @@ impl CredentialIDData {
             OathType::Totp
         };
         let (issuer, name, period) = CredentialIDData::parse_cred_id(id_bytes, oath_type);
-        return CredentialIDData {
+        CredentialIDData {
             issuer,
             name,
             period,
             oath_type,
-        };
+        }
     }
 }

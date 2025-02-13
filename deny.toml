@@ -1,0 +1,18 @@
+
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+ignore = []
+
+[licenses]
+allow = [
+    "MIT", # from ouroboros
+    "Unicode-3.0",
+    "ISC", # from iso7816-tlv
+    "BSD-3-Clause"
+]
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+highlight = "all"

@@ -11,9 +11,9 @@ use crate::{ErrorResponse, Instruction, SuccessResponse, Tag};
 pub enum Error {
     Unknown(String),
     Protocol(ErrorResponse),
-    PcscError(pcsc::Error),
-    ParsingError(String),
-    DeviceMismatchError,
+    Pcsc(pcsc::Error),
+    Parsing(String),
+    DeviceMismatch,
 }
 
 impl Error {
@@ -34,7 +34,7 @@ impl Error {
 
 impl From<pcsc::Error> for Error {
     fn from(value: pcsc::Error) -> Self {
-        Self::PcscError(value)
+        Self::Pcsc(value)
     }
 }
 
@@ -43,12 +43,14 @@ impl Display for Error {
         match self {
             Self::Unknown(msg) => f.write_str(msg),
             Self::Protocol(error_response) => f.write_fmt(format_args!("{}", error_response)),
-            Self::PcscError(error) => f.write_fmt(format_args!("{}", error)),
-            Self::ParsingError(msg) => f.write_str(msg),
-            Self::DeviceMismatchError => f.write_str("Devices do not match"),
+            Self::Pcsc(error) => f.write_fmt(format_args!("{}", error)),
+            Self::Parsing(msg) => f.write_str(msg),
+            Self::DeviceMismatch => f.write_str("Devices do not match"),
         }
     }
 }
+
+impl std::error::Error for Error {}
 
 pub struct ApduResponse {
     pub buf: Vec<u8>,
@@ -181,7 +183,7 @@ pub fn tlv_to_map(data: Vec<u8>) -> HashMap<u8, Vec<u8>> {
     for res in TlvIter::from_vec(data) {
         parsed_manual.insert(res.tag().into(), res.value().to_vec());
     }
-    return parsed_manual;
+    parsed_manual
 }
 
 pub struct TlvZipIter<'a> {
@@ -205,10 +207,10 @@ impl<'a> TlvZipIter<'a> {
     }
 }
 
-impl<'a> Iterator for TlvZipIter<'a> {
+impl Iterator for TlvZipIter<'_> {
     type Item = (Tlv, Tlv);
     fn next(&mut self) -> Option<Self::Item> {
-        return Some((self.iter.next()?, self.iter.next()?));
+        Some((self.iter.next()?, self.iter.next()?))
     }
 }
 
@@ -226,7 +228,7 @@ impl<'a> TlvIter<'a> {
     }
 }
 
-impl<'a> Iterator for TlvIter<'a> {
+impl Iterator for TlvIter<'_> {
     type Item = Tlv;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -235,7 +237,7 @@ impl<'a> Iterator for TlvIter<'a> {
         }
         let (r, remaining) = Tlv::parse(self.buf);
         self.buf = remaining;
-        return r.ok();
+        r.ok()
     }
 }
 
@@ -244,8 +246,8 @@ pub fn tlv_to_lists(data: Vec<u8>) -> HashMap<u8, Vec<Vec<u8>>> {
     for res in TlvIter::from_vec(data) {
         parsed_manual
             .entry(res.tag().into())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(res.value().to_vec());
     }
-    return parsed_manual;
+    parsed_manual
 }

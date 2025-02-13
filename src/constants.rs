@@ -2,8 +2,6 @@ use std::fmt::Display;
 
 use iso7816_tlv::simple::Tlv;
 use sha1::Digest;
-use strum::IntoEnumIterator; // 0.17.1
-use strum_macros::EnumIter; // 0.17.1
 pub const INS_SELECT: u8 = 0xa4;
 pub const OATH_AID: [u8; 7] = [0xa0, 0x00, 0x00, 0x05, 0x27, 0x21, 0x01];
 
@@ -11,7 +9,7 @@ pub const DEFAULT_PERIOD: u32 = 30;
 pub const DEFAULT_DIGITS: OathDigits = OathDigits::Six;
 pub const DEFAULT_IMF: u32 = 0;
 
-#[derive(Debug, EnumIter, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum ErrorResponse {
     NoSpace = 0x6a84,
@@ -25,12 +23,23 @@ pub enum ErrorResponse {
 
 impl ErrorResponse {
     pub fn any_match(code: u16) -> Option<ErrorResponse> {
-        for resp in ErrorResponse::iter() {
-            if code == resp as u16 {
-                return Some(resp);
-            }
+        if code == ErrorResponse::NoSpace as u16 {
+            Some(ErrorResponse::NoSpace)
+        } else if code == ErrorResponse::CommandAborted as u16 {
+            Some(ErrorResponse::CommandAborted)
+        } else if code == ErrorResponse::InvalidInstruction as u16 {
+            Some(ErrorResponse::InvalidInstruction)
+        } else if code == ErrorResponse::AuthRequired as u16 {
+            Some(ErrorResponse::AuthRequired)
+        } else if code == ErrorResponse::WrongSyntax as u16 {
+            Some(ErrorResponse::WrongSyntax)
+        } else if code == ErrorResponse::GenericError as u16 {
+            Some(ErrorResponse::GenericError)
+        } else if code == ErrorResponse::NoSuchObject as u16 {
+            Some(ErrorResponse::NoSuchObject)
+        } else {
+            None
         }
-        None
     }
 }
 
@@ -50,7 +59,7 @@ impl std::fmt::Display for ErrorResponse {
 
 impl std::error::Error for ErrorResponse {}
 
-#[derive(Debug, EnumIter, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 #[repr(u16)]
 pub enum SuccessResponse {
     MoreData = 0x61,
@@ -59,12 +68,13 @@ pub enum SuccessResponse {
 
 impl SuccessResponse {
     pub fn any_match(code: u16) -> Option<SuccessResponse> {
-        for resp in SuccessResponse::iter() {
-            if code == resp as u16 {
-                return Some(resp);
-            }
+        if code == SuccessResponse::MoreData as u16 {
+            Some(SuccessResponse::MoreData)
+        } else if code == SuccessResponse::Okay as u16 {
+            Some(SuccessResponse::Okay)
+        } else {
+            None
         }
-        None
     }
 }
 
@@ -171,14 +181,6 @@ impl Display for OathCodeDisplay {
 
 impl OathCodeDisplay {
     pub fn from_tlv(tlv: Tlv) -> Option<Self> {
-        if Into::<u8>::into(tlv.tag()) == (Tag::TruncatedResponse as u8) && tlv.value().len() == 5 {
-            let display = OathCodeDisplay::new(tlv.value()[..].try_into().unwrap());
-            Some(display)
-        } else {
-            None
-        }
-    }
-    pub fn from_bytes(tlv: Tlv) -> Option<Self> {
         if Into::<u8>::into(tlv.tag()) == (Tag::TruncatedResponse as u8) && tlv.value().len() == 5 {
             let display = OathCodeDisplay::new(tlv.value()[..].try_into().unwrap());
             Some(display)
