@@ -18,23 +18,23 @@ pub enum FormattableErrorResponse {
 }
 
 impl FormattableErrorResponse {
-    pub fn from_apdu_response(sw1: u8, sw2: u8) -> FormattableErrorResponse {
+    pub fn from_apdu_response(sw1: u8, sw2: u8) -> Self {
         let code: u16 = (sw1 as u16 | sw2 as u16) << 8;
         if let Some(e) = ErrorResponse::any_match(code) {
-            return FormattableErrorResponse::Protocol(e);
+            return Self::Protocol(e);
         }
         if SuccessResponse::any_match(code)
             .or(SuccessResponse::any_match(sw1.into()))
             .is_some()
         {
-            return FormattableErrorResponse::NoError;
+            return Self::NoError;
         }
-        FormattableErrorResponse::Unknown(String::from("Unknown error"))
+        Self::Unknown(String::from("Unknown error"))
     }
     pub fn is_ok(&self) -> bool {
-        *self == FormattableErrorResponse::NoError
+        *self == Self::NoError
     }
-    pub fn as_opt(self) -> Option<FormattableErrorResponse> {
+    pub fn as_opt(self) -> Option<Self> {
         if self.is_ok() {
             None
         } else {
@@ -42,25 +42,27 @@ impl FormattableErrorResponse {
         }
     }
 
-    fn from_transmit(err: pcsc::Error) -> FormattableErrorResponse {
-        FormattableErrorResponse::PcscError(err)
+    fn from_transmit(err: pcsc::Error) -> Self {
+        Self::PcscError(err)
     }
+}
 
-    fn as_string(&self) -> String {
-        match self {
-            FormattableErrorResponse::NoError => "ok".to_string(),
-            FormattableErrorResponse::Unknown(msg) => msg.to_owned(),
-            FormattableErrorResponse::Protocol(error_response) => error_response.as_string(),
-            FormattableErrorResponse::PcscError(error) => format!("{}", error),
-            FormattableErrorResponse::ParsingError(msg) => msg.to_owned(),
-            FormattableErrorResponse::DeviceMismatchError => "Devices do not match".to_string(),
-        }
+impl From<pcsc::Error> for FormattableErrorResponse {
+    fn from(value: pcsc::Error) -> Self {
+        Self::PcscError(value)
     }
 }
 
 impl Display for FormattableErrorResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.as_string())
+        match self {
+            Self::NoError => f.write_str("ok"),
+            Self::Unknown(msg) => f.write_str(msg),
+            Self::Protocol(error_response) => f.write_fmt(format_args!("{}", error_response)),
+            Self::PcscError(error) => f.write_fmt(format_args!("{}", error)),
+            Self::ParsingError(msg) => f.write_str(msg),
+            Self::DeviceMismatchError => f.write_str("Devices do not match"),
+        }
     }
 }
 
@@ -139,26 +141,22 @@ pub struct TransactionContext {
 }
 
 impl TransactionContext {
-    pub fn from_name(name: &str) -> Self {
-        // FIXME: error handling here
-
+    pub fn from_name(name: &str) -> Result<Self, FormattableErrorResponse> {
         // Establish a PC/SC context
-        let ctx = pcsc::Context::establish(pcsc::Scope::User).unwrap();
+        let ctx = pcsc::Context::establish(pcsc::Scope::User)?;
 
         // Connect to the card
-        let card = ctx
-            .connect(
-                &CString::new(name).unwrap(),
-                pcsc::ShareMode::Shared,
-                pcsc::Protocols::ANY,
-            )
-            .unwrap();
+        let card = ctx.connect(
+            &CString::new(name).unwrap(),
+            pcsc::ShareMode::Shared,
+            pcsc::Protocols::ANY,
+        )?;
 
-        TransactionContextBuilder {
+        Ok(TransactionContextBuilder {
             card,
             transaction_builder: |c| c.transaction().unwrap(),
         }
-        .build()
+        .build())
     }
 
     pub fn apdu(

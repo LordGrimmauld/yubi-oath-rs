@@ -133,8 +133,8 @@ impl<'a> RefreshableOathCredential<'a> {
 }
 
 impl<'a> OathSession<'a> {
-    pub fn new(name: &str) -> Self {
-        let transaction_context = TransactionContext::from_name(name);
+    pub fn new(name: &str) -> Result<Self, FormattableErrorResponse> {
+        let transaction_context = TransactionContext::from_name(name)?;
         let info_buffer = transaction_context
             .apdu_read_all(0, INS_SELECT, 0x04, 0, Some(&OATH_AID))
             .unwrap();
@@ -145,7 +145,7 @@ impl<'a> OathSession<'a> {
             println!("{:?}: {:?}", tag, data);
         }
 
-        OathSession {
+        Ok(Self {
             version: clone_with_lifetime(
                 info_map.get(&(Tag::Version as u8)).unwrap_or(&vec![0u8; 0]),
             )
@@ -160,7 +160,7 @@ impl<'a> OathSession<'a> {
             .leak(),
             name: name.to_string(),
             transaction_context,
-        }
+        })
     }
 
     pub fn get_version(&self) -> &[u8] {

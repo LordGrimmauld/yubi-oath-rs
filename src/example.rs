@@ -30,7 +30,7 @@ fn main() {
     for yubikey in yubikeys {
         let device_label: &str = yubikey;
         println!("Found device with label {}", device_label);
-        let session = OathSession::new(yubikey);
+        let session = OathSession::new(yubikey).unwrap();
         println!("YubiKey version is {:?}", session.get_version());
         for c in session.list_oath_codes().unwrap() {
             println!("{}", c);

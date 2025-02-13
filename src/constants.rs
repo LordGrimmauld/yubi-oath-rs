@@ -24,19 +24,6 @@ pub enum ErrorResponse {
 }
 
 impl ErrorResponse {
-    pub fn as_string(self) -> String {
-        match self {
-            ErrorResponse::NoSpace => "No Space left on device",
-            ErrorResponse::CommandAborted => "Command aborted",
-            ErrorResponse::InvalidInstruction => "Invalid instruction",
-            ErrorResponse::AuthRequired => "Authentication required",
-            ErrorResponse::WrongSyntax => "Wrong syntax",
-            ErrorResponse::GenericError => "Generic Error",
-            ErrorResponse::NoSuchObject => "No such Object",
-        }
-        .to_string()
-    }
-
     pub fn any_match(code: u16) -> Option<ErrorResponse> {
         for resp in ErrorResponse::iter() {
             if code == resp as u16 {
@@ -46,6 +33,22 @@ impl ErrorResponse {
         None
     }
 }
+
+impl std::fmt::Display for ErrorResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoSpace => f.write_str("No Space left on device"),
+            Self::CommandAborted => f.write_str("Command aborted"),
+            Self::InvalidInstruction => f.write_str("Invalid instruction"),
+            Self::AuthRequired => f.write_str("Authentication required"),
+            Self::WrongSyntax => f.write_str("Wrong syntax"),
+            Self::GenericError => f.write_str("Generic Error"),
+            Self::NoSuchObject => f.write_str("No such Object"),
+        }
+    }
+}
+
+impl std::error::Error for ErrorResponse {}
 
 #[derive(Debug, EnumIter, Clone, Copy)]
 #[repr(u16)]
