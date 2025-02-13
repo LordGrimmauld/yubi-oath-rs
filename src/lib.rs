@@ -4,15 +4,13 @@ mod transaction;
 use transaction::*;
 mod oath_credential;
 mod oath_credentialid;
-use oath_credential::*;
-use oath_credentialid::*;
 /// Utilities for interacting with YubiKey OATH/TOTP functionality
-use std::{fmt::Display, time::Duration};
+use std::{fmt::Display, time::Duration, time::SystemTime};
 
 use base64::{engine::general_purpose, Engine as _};
 use hmac::{Hmac, Mac};
-
-use std::time::SystemTime;
+use oath_credential::*;
+use oath_credentialid::*;
 
 fn _get_device_id(salt: Vec<u8>) -> String {
     let result = HashAlgo::Sha256.get_hash_fun()(salt.leak());
@@ -221,7 +219,8 @@ impl<'a> OathSession<'a> {
         ))
     }
 
-    /// Read the OATH codes from the device, calculate TOTP codes that don't need touch
+    /// Read the OATH codes from the device, calculate TOTP codes that don't
+    /// need touch
     pub fn calculate_oath_codes(
         &self,
     ) -> Result<Vec<RefreshableOathCredential>, FormattableErrorResponse> {
@@ -242,8 +241,8 @@ impl<'a> OathSession<'a> {
             let id_data = CredentialIDData::from_tlv(cred_id.value(), meta.tag());
             let code = OathCodeDisplay::from_tlv(meta);
 
-            /* println!("id bytes: {:?}", cred_id.value());
-            println!("id recon: {:?}", id_data.format_cred_id()); */
+            // println!("id bytes: {:?}", cred_id.value());
+            // println!("id recon: {:?}", id_data.format_cred_id());
 
             let cred = OathCredential {
                 device_id: self.name.clone(),

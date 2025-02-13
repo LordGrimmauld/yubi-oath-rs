@@ -1,13 +1,9 @@
-use iso7816_tlv::simple::{Tag as TlvTag, Tlv};
-use ouroboros::self_referencing;
-use std::collections::HashMap;
-use std::fmt::Display;
+use std::{collections::HashMap, ffi::CString, fmt::Display};
 
 use apdu_core::{Command, Response};
-
+use iso7816_tlv::simple::{Tag as TlvTag, Tlv};
+use ouroboros::self_referencing;
 use pcsc::{Card, Transaction};
-
-use std::ffi::CString;
 
 use crate::{ErrorResponse, Instruction, SuccessResponse, Tag};
 

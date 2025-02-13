@@ -1,6 +1,6 @@
-use regex::Regex;
-
 use std::fmt::Display;
+
+use regex::Regex;
 
 use crate::{OathType, Tag, DEFAULT_PERIOD};
 
