@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
-mod lib_ykoath2;
-
-use core::time;
 use lib_ykoath2::OathSession;
-use pcsc;
-use std::process;
-use std::thread;
 // use crate::args::Cli;
 
 // use clap::Parser;
@@ -29,14 +23,14 @@ fn main() {
     // Show message if no YubiKey(s)
     if yubikeys.len() == 0 {
         println!("No yubikeys detected");
-        process::exit(0);
+        std::process::exit(0);
     }
 
     // Print device info for all the YubiKeys we detected
     for yubikey in yubikeys {
         let device_label: &str = yubikey;
         println!("Found device with label {}", device_label);
-        let session = OathSession::new(yubikey);
+        let session = OathSession::new(yubikey).unwrap();
         println!("YubiKey version is {:?}", session.get_version());
         for c in session.list_oath_codes().unwrap() {
             println!("{}", c);
@@ -55,7 +49,7 @@ fn main() {
             println!("No credentials on device {}", device_label);
         }
 
-        thread::sleep(time::Duration::from_secs(5)); // show refresh is working
+        std::thread::sleep(std::time::Duration::from_secs(5)); // show refresh is working
 
         // Enumerate the OATH codes
         for oath in codes {

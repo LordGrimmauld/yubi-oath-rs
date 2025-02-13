@@ -1,20 +1,9 @@
-#[crate_type = "lib"]
-use crate::lib_ykoath2::*;
-/// Utilities for interacting with YubiKey OATH/TOTP functionality
-extern crate pcsc;
-use pbkdf2::pbkdf2_hmac_array;
-use regex::Regex;
-use sha1::Sha1;
+use std::{
+    cmp::Ordering,
+    hash::{Hash, Hasher},
+};
 
-use std::str::{self};
-
-use base64::{engine::general_purpose, Engine as _};
-use hmac::{Hmac, Mac};
-
-use std::cmp::Ordering;
-use std::hash::{Hash, Hasher};
-
-use std::time::SystemTime;
+use crate::CredentialIDData;
 
 #[derive(Debug, Clone)]
 pub struct OathCredential {

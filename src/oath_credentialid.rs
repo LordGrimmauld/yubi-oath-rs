@@ -1,13 +1,8 @@
-#![crate_type = "lib"]
-use crate::lib_ykoath2::*;
-/// Utilities for interacting with YubiKey OATH/TOTP functionality
-extern crate pcsc;
+use std::fmt::Display;
+
 use regex::Regex;
 
-use std::{
-    fmt::Write,
-    str::{self},
-};
+use crate::{to_tlv, OathType, Tag, DEFAULT_PERIOD};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct CredentialIDData {
@@ -52,7 +47,7 @@ impl CredentialIDData {
 
     // Function to parse the credential ID
     fn parse_cred_id(cred_id: &[u8], oath_type: OathType) -> (Option<String>, String, u32) {
-        let data = match str::from_utf8(cred_id) {
+        let data = match std::str::from_utf8(cred_id) {
             Ok(d) => d,
             Err(_) => return (None, String::new(), 0), // Handle invalid UTF-8
         };
