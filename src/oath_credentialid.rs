@@ -62,7 +62,9 @@ impl CredentialIDData {
                         .and_then(|s| s.as_str().parse::<u32>().ok())
                         .map(|t| Duration::from_secs(t as u64))
                         .unwrap_or(DEFAULT_PERIOD);
-                    (Some(caps[4].to_string()), caps[5].to_string(), period)
+                    let issuer = caps.get(4).map(|m| m.as_str().to_string());
+                    let cred_name = caps.get(5).map_or(data, |m| m.as_str());
+                    (issuer, cred_name.to_string(), period)
                 })
         } else {
             data.split_once(':')
