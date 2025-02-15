@@ -30,7 +30,12 @@ fn main() {
     for yubikey in yubikeys {
         let device_label: &str = yubikey;
         println!("Found device with label {}", device_label);
-        let session = OathSession::new(yubikey).unwrap();
+        let mut session = OathSession::new(yubikey).unwrap();
+
+        // session.set_key(&session.derive_key("1234")).unwrap();
+        // session.unlock_session(&session.derive_key("1234")).unwrap();
+        // session.unset_key().unwrap();
+
         println!("YubiKey version is {:?}", session.get_version());
         for c in session.list_oath_codes().unwrap() {
             println!("{}", c);
@@ -49,7 +54,7 @@ fn main() {
             println!("No credentials on device {}", device_label);
         }
 
-        std::thread::sleep(std::time::Duration::from_secs(5)); // show refresh is working
+        std::thread::sleep(std::time::Duration::from_secs(0)); // show refresh is working
 
         // Enumerate the OATH codes
         for oath in codes {

@@ -32,24 +32,12 @@ fn _hmac_sha1(key: &[u8], message: &[u8]) -> Vec<u8> {
     mac.finalize().into_bytes().to_vec()
 }
 
-fn _derive_key(salt: &[u8], passphrase: &str) -> Vec<u8> {
-    pbkdf2::pbkdf2_hmac_array::<sha1::Sha1, 16>(passphrase.as_bytes(), salt, 1000).to_vec()
-}
-
 fn _hmac_shorten_key(key: &[u8], algo: HashAlgo) -> Vec<u8> {
     if key.len() > algo.digest_size() {
         algo.get_hash_fun()(key)
     } else {
         key.to_vec()
     }
-}
-
-pub struct OathSession {
-    version: Vec<u8>,
-    salt: Vec<u8>,
-    challenge: Vec<u8>,
-    transaction_context: TransactionContext,
-    pub name: String,
 }
 
 pub struct RefreshableOathCredential<'a> {
@@ -130,6 +118,15 @@ impl<'a> RefreshableOathCredential<'a> {
     }
 }
 
+pub struct OathSession {
+    version: Vec<u8>,
+    salt: Vec<u8>,
+    challenge: Option<Vec<u8>>,
+    transaction_context: TransactionContext,
+    pub locked: bool,
+    pub name: String,
+}
+
 impl OathSession {
     pub fn new(name: &str) -> Result<Self, Error> {
         let transaction_context = TransactionContext::from_name(name)?;
@@ -142,7 +139,9 @@ impl OathSession {
             println!("{:?}: {:?}", tag, data);
         }
 
+        let challenge = info_map.get(&(Tag::Challenge as u8)).map(Vec::to_owned);
         Ok(Self {
+            locked: challenge.is_some(),
             version: info_map
                 .get(&(Tag::Version as u8))
                 .unwrap_or(&vec![0u8; 0])
@@ -151,10 +150,7 @@ impl OathSession {
                 .get(&(Tag::Name as u8))
                 .unwrap_or(&vec![0u8; 0])
                 .to_owned(),
-            challenge: info_map
-                .get(&(Tag::Challenge as u8))
-                .unwrap_or(&vec![0u8; 0])
-                .to_owned(),
+            challenge,
             name: name.to_string(),
             transaction_context,
         })
@@ -162,6 +158,76 @@ impl OathSession {
 
     pub fn get_version(&self) -> &[u8] {
         &self.version
+    }
+
+    pub fn unlock_session(&mut self, key: &[u8]) -> Result<(), Error> {
+        let chal = match self.challenge.to_owned() {
+            Some(chal) => chal,
+            None => return Ok(()),
+        };
+
+        if !self.locked {
+            return Ok(());
+        }
+
+        let hmac = _hmac_sha1(key, &chal);
+        let random_chal = getrandom::u64().unwrap().to_be_bytes(); // FIXME: unwrap
+        let data = &[
+            to_tlv(Tag::Response, &hmac),
+            to_tlv(Tag::Challenge, &random_chal),
+        ]
+        .concat();
+        let resp =
+            self.transaction_context
+                .apdu(0, Instruction::Validate as u8, 0, 0, Some(data))?;
+        let verification = _hmac_sha1(key, &random_chal);
+        if tlv_to_map(resp.buf)
+            .get(&(Tag::Response as u8))
+            .map(|v| *v == verification)
+            .unwrap_or(false)
+        {
+            self.locked = false;
+            Ok(())
+        } else {
+            Err(Error::FailedAuthentication)
+        }
+    }
+
+    pub fn set_key(&mut self, key: &[u8]) -> Result<(), Error> {
+        let random_chal = getrandom::u64().unwrap().to_be_bytes(); // FIXME: unwrap
+        let hmac = _hmac_sha1(key, &random_chal);
+        let data = &[
+            to_tlv(
+                Tag::Key,
+                &[&[(OathType::Totp as u8) | (HashAlgo::Sha1 as u8); 1], key].concat(),
+            ),
+            to_tlv(Tag::Challenge, &random_chal),
+            to_tlv(Tag::Response, &hmac),
+        ]
+        .concat();
+        self.transaction_context
+            .apdu(0, Instruction::SetCode as u8, 0, 0, Some(data))?;
+        let info_buffer =
+            self.transaction_context
+                .apdu_read_all(0, INS_SELECT, 0x04, 0, Some(&OATH_AID))?;
+        let info_map = tlv_to_map(info_buffer);
+        self.challenge = info_map.get(&(Tag::Challenge as u8)).map(Vec::to_owned);
+        self.locked = self.challenge.is_some();
+
+        self.unlock_session(key)
+    }
+
+    pub fn unset_key(&mut self) -> Result<(), Error> {
+        self.transaction_context.apdu(
+            0,
+            Instruction::SetCode as u8,
+            0,
+            0,
+            Some(&to_tlv(Tag::Key, &[0u8; 0])),
+        )?;
+        self.locked = false;
+        self.challenge = None;
+        Ok(())
     }
 
     pub fn rename_credential(
@@ -188,6 +254,11 @@ impl OathSession {
             0,
             Some(&cred.id_data.as_tlv()),
         )
+    }
+
+    pub fn derive_key(&self, passphrase: &str) -> Vec<u8> {
+        pbkdf2::pbkdf2_hmac_array::<sha1::Sha1, 16>(passphrase.as_bytes(), &self.salt, 1000)
+            .to_vec()
     }
 
     pub fn calculate_code(

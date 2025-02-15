@@ -14,6 +14,7 @@ pub enum Error {
     Pcsc(pcsc::Error),
     Parsing(String),
     DeviceMismatch,
+    FailedAuthentication,
 }
 
 impl Error {
@@ -46,6 +47,7 @@ impl Display for Error {
             Self::Pcsc(error) => f.write_fmt(format_args!("{}", error)),
             Self::Parsing(msg) => f.write_str(msg),
             Self::DeviceMismatch => f.write_str("Devices do not match"),
+            Error::FailedAuthentication => f.write_str("Authentication failure"),
         }
     }
 }
