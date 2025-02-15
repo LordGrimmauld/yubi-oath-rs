@@ -16,6 +16,7 @@ pub enum Error {
     DeviceMismatch,
     Authentication,
     Random(getrandom::Error),
+    Version(Vec<u8>, Vec<u8>),
 }
 
 impl Error {
@@ -56,6 +57,17 @@ impl Display for Error {
             Self::DeviceMismatch => f.write_str("Devices do not match"),
             Self::Authentication => f.write_str("Authentication failure"),
             Self::Random(error_response) => f.write_fmt(format_args!("{}", error_response)),
+            Self::Version(ver, req) => f.write_fmt(format_args!(
+                "Version requirement not met: is {}, required {}",
+                ver.iter()
+                    .map(u8::to_string)
+                    .collect::<Vec<String>>()
+                    .join("."),
+                req.iter()
+                    .map(u8::to_string)
+                    .collect::<Vec<String>>()
+                    .join(".")
+            )),
         }
     }
 }

@@ -154,6 +154,22 @@ impl OathSession {
         &self.version
     }
 
+    fn is_at_least_version(&self, minimum_version: Vec<u8>) -> bool {
+        for (local, compare) in self.version.iter().zip(minimum_version) {
+            if *local < compare {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub fn require_version(&self, version: Vec<u8>) -> Result<(), Error> {
+        if !self.is_at_least_version(version.to_owned()) {
+            return Err(Error::Version(self.version.clone(), version));
+        }
+        Ok(())
+    }
+
     pub fn unlock_session(&mut self, key: &[u8]) -> Result<(), Error> {
         let chal = match self.challenge.to_owned() {
             Some(chal) => chal,
@@ -240,7 +256,7 @@ impl OathSession {
             return Err(Error::Authentication);
         }
 
-        // require_version(self.version, (5, 3, 1)) TODO: version checking
+        self.require_version(vec![5, 3, 1])?;
         self.transaction_context.apdu(
             0,
             Instruction::Rename as u8,
@@ -336,9 +352,6 @@ impl OathSession {
             let touch = Into::<u8>::into(meta.tag()) == (Tag::Touch as u8); // touch only works with totp, this is intended
             let id_data = CredentialIDData::from_tlv(cred_id.value(), meta.tag());
             let code = OathCodeDisplay::from_tlv(meta);
-
-            // println!("id bytes: {:?}", cred_id.value());
-            // println!("id recon: {:?}", id_data.format_cred_id());
 
             let cred = OathCredential {
                 device_id: self.name.clone(),
