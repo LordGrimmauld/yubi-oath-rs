@@ -258,7 +258,7 @@ impl OathSession {
         timestamp_sys: Option<SystemTime>,
     ) -> Result<RefreshableOathCredential, Error> {
         let timestamp = timestamp_sys.unwrap_or_else(SystemTime::now);
-        let code = self.calculate_code(&cred, timestamp_sys)?;
+        let code = self.calculate_code(cred, timestamp_sys)?;
         let mut refreshable_cred = RefreshableOathCredential::new(cred.to_owned(), self);
         refreshable_cred.force_update(Some(code), timestamp);
 
