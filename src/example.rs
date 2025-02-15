@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
-use ykoath2::constants::{HashAlgo, OathDigits, OathType, DEFAULT_PERIOD};
+use ykoath2::constants::{HashAlgo, OathType, DEFAULT_PERIOD};
 use ykoath2::oath_credential::OathCredential;
-use ykoath2::oath_credentialid::CredentialIDData;
+use ykoath2::oath_credential_id::CredentialIDData;
 use ykoath2::OathSession;
 // use crate::args::Cli;
 
@@ -55,7 +55,7 @@ fn main() {
                 cred.clone(),
                 "f5up4ub3dw".as_bytes(),
                 HashAlgo::Sha256,
-                OathDigits::Six,
+                6,
                 None,
             )
             .unwrap();

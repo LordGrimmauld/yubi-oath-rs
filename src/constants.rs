@@ -2,14 +2,24 @@ use std::{fmt::Display, time::Duration};
 
 use iso7816_tlv::simple::Tlv;
 use sha1::Digest;
+
+/// te apdu instruction required to select the Oath application on the YubiKey
 pub const INS_SELECT: u8 = 0xa4;
+
+/// the stream of data bytes required to select the Oath application on the YubiKey
 pub const OATH_AID: [u8; 7] = [0xa0, 0x00, 0x00, 0x05, 0x27, 0x21, 0x01];
 
+/// The default duration that generated codes are valid for is 30 seconds.
+/// Non-default values are saved and retrieved from the YubiKey.
+/// If not explicitly declared otherwise, this is the fallback that will be used.
 pub const DEFAULT_PERIOD: Duration = Duration::from_secs(30);
-pub const DEFAULT_DIGITS: OathDigits = OathDigits::Six;
-pub const DEFAULT_IMF: u32 = 0;
+
+/// Oath keys on the YubiKey are stored by a handle.
+/// If the original handle is too long, it will be shortend to an hmac.
+/// If the key is too short, it will be padded to have the minimum length.
 pub const HMAC_MINIMUM_KEY_SIZE: usize = 14;
 
+/// Error Response codes as returned by the YubiKey
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum ErrorResponse {
@@ -60,6 +70,7 @@ impl std::fmt::Display for ErrorResponse {
 
 impl std::error::Error for ErrorResponse {}
 
+/// Success response codes as returned by the YubiKey
 #[derive(Debug, Clone, Copy)]
 #[repr(u16)]
 pub enum SuccessResponse {
@@ -79,6 +90,7 @@ impl SuccessResponse {
     }
 }
 
+/// Set of possible instructions to use with the YubiKey via apdu
 #[repr(u8)]
 pub enum Instruction {
     Put = 0x01,
@@ -93,12 +105,7 @@ pub enum Instruction {
     SendRemaining = 0xa5,
 }
 
-#[repr(u8)]
-pub enum Mask {
-    Algo = 0x0f,
-    Type = 0xf0,
-}
-
+/// possible tlv tag values to use with apdu
 #[repr(u8)]
 pub enum Tag {
     Name = 0x71,
@@ -115,6 +122,7 @@ pub enum Tag {
     Touch = 0x7c,
 }
 
+/// Different Hash algorithms supported by the YubiKey to generate OTPs
 #[derive(Debug, PartialEq, Copy, Clone)]
 #[repr(u8)]
 pub enum HashAlgo {
@@ -124,7 +132,8 @@ pub enum HashAlgo {
 }
 
 impl HashAlgo {
-    // returns a function capable of hashing a byte array
+    /// returns a function capable of hashing a byte array
+    /// necessary to be able to validate keys before enrolling them on the hardware key
     pub fn get_hash_fun(&self) -> impl Fn(&[u8]) -> Vec<u8> {
         match self {
             Self::Sha1 => |m: &[u8]| {
@@ -145,7 +154,7 @@ impl HashAlgo {
         }
     }
 
-    // returns digest output size in number of bytes
+    /// returns digest output size in number of bytes
     pub fn digest_size(&self) -> usize {
         match self {
             Self::Sha1 => 20,
@@ -155,6 +164,7 @@ impl HashAlgo {
     }
 }
 
+/// different types of oath to generate OTPs
 #[derive(Debug, PartialEq, Copy, Clone, Eq, Hash)]
 #[repr(u8)]
 pub enum OathType {
@@ -162,12 +172,8 @@ pub enum OathType {
     Hotp = 0x20,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum OathDigits {
-    Six = 6,
-    Eight = 8,
-}
-
+/// describes display information of a code, keeping track of the code and number of digits
+/// digits *should* be either 6 or 8, but nothing is preventing the yubikey from returning e.g. 7 digits, which would "just work".
 #[derive(Debug, PartialEq, Hash, Eq, Copy, Clone)]
 pub struct OathCodeDisplay {
     code: u32,
@@ -181,19 +187,24 @@ impl Display for OathCodeDisplay {
 }
 
 impl OathCodeDisplay {
+    /// extracts display information (digits and code) from a `Tlv` instance
     pub fn from_tlv(tlv: Tlv) -> Option<Self> {
-        if Into::<u8>::into(tlv.tag()) == (Tag::TruncatedResponse as u8) && tlv.value().len() == 5 {
-            let display = OathCodeDisplay::new(tlv.value()[..].try_into().unwrap());
-            Some(display)
+        if Into::<u8>::into(tlv.tag()) == (Tag::TruncatedResponse as u8) {
+            TryInto::<&[u8; 5]>::try_into(tlv.value())
+                .ok()
+                .and_then(OathCodeDisplay::new)
         } else {
             None
         }
     }
 
-    pub fn new(bytes: &[u8; 5]) -> Self {
-        Self {
-            digits: bytes[0],
-            code: u32::from_be_bytes((&bytes[1..5]).try_into().unwrap()),
-        }
+    /// extract display information from a 5-bytes buffer
+    pub fn new(bytes: &[u8; 5]) -> Option<Self> {
+        TryInto::<[u8; 4]>::try_into(&bytes[1..])
+            .ok()
+            .map(|code_bytes| Self {
+                digits: bytes[0],
+                code: u32::from_be_bytes(code_bytes),
+            })
     }
 }

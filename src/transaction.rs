@@ -14,14 +14,13 @@ pub enum Error {
     Pcsc(pcsc::Error),
     Parsing(String),
     DeviceMismatch,
-    Authentication,
     Random(getrandom::Error),
     Version(Vec<u8>, Vec<u8>),
 }
 
 impl Error {
     fn from_apdu_response(sw1: u8, sw2: u8) -> Result<(), Self> {
-        let code: u16 = (sw1 as u16 | sw2 as u16) << 8;
+        let code: u16 = ((sw1 as u16) << 8) | (sw2 as u16);
         if let Some(e) = ErrorResponse::any_match(code) {
             return Err(Self::Protocol(e));
         }
@@ -55,7 +54,6 @@ impl Display for Error {
             Self::Pcsc(error) => f.write_fmt(format_args!("{}", error)),
             Self::Parsing(msg) => f.write_str(msg),
             Self::DeviceMismatch => f.write_str("Devices do not match"),
-            Self::Authentication => f.write_str("Authentication failure"),
             Self::Random(error_response) => f.write_fmt(format_args!("{}", error_response)),
             Self::Version(ver, req) => f.write_fmt(format_args!(
                 "Version requirement not met: is {}, required {}",
