@@ -104,7 +104,6 @@ impl<'a> RefreshableOathCredential<'a> {
                 let valid_from = SystemTime::UNIX_EPOCH
                     .checked_add(self.cred.id_data.period.saturating_mul(time_step as u32))
                     .unwrap();
-                // time_step * (self.cred.id_data.period.as_secs());
                 let valid_to = valid_from.checked_add(self.cred.id_data.period).unwrap();
                 valid_from..valid_to
             }
@@ -134,11 +133,6 @@ impl OathSession {
             transaction_context.apdu_read_all(0, INS_SELECT, 0x04, 0, Some(&OATH_AID))?;
 
         let info_map = tlv_to_map(info_buffer);
-        for (tag, data) in &info_map {
-            // Printing tag and data
-            println!("{:?}: {:?}", tag, data);
-        }
-
         let challenge = info_map.get(&(Tag::Challenge as u8)).map(Vec::to_owned);
         Ok(Self {
             locked: challenge.is_some(),
@@ -171,7 +165,7 @@ impl OathSession {
         }
 
         let hmac = _hmac_sha1(key, &chal);
-        let random_chal = getrandom::u64().unwrap().to_be_bytes(); // FIXME: unwrap
+        let random_chal = getrandom::u64()?.to_be_bytes();
         let data = &[
             to_tlv(Tag::Response, &hmac),
             to_tlv(Tag::Challenge, &random_chal),
@@ -189,12 +183,15 @@ impl OathSession {
             self.locked = false;
             Ok(())
         } else {
-            Err(Error::FailedAuthentication)
+            Err(Error::Authentication)
         }
     }
 
     pub fn set_key(&mut self, key: &[u8]) -> Result<(), Error> {
-        let random_chal = getrandom::u64().unwrap().to_be_bytes(); // FIXME: unwrap
+        if self.locked {
+            return Err(Error::Authentication);
+        }
+        let random_chal = getrandom::u64()?.to_be_bytes();
         let hmac = _hmac_sha1(key, &random_chal);
         let data = &[
             to_tlv(
@@ -218,6 +215,10 @@ impl OathSession {
     }
 
     pub fn unset_key(&mut self) -> Result<(), Error> {
+        if self.locked {
+            return Err(Error::Authentication);
+        }
+
         self.transaction_context.apdu(
             0,
             Instruction::SetCode as u8,
@@ -235,6 +236,10 @@ impl OathSession {
         old: CredentialIDData,
         new: CredentialIDData,
     ) -> Result<CredentialIDData, Error> {
+        if self.locked {
+            return Err(Error::Authentication);
+        }
+
         // require_version(self.version, (5, 3, 1)) TODO: version checking
         self.transaction_context.apdu(
             0,
@@ -247,6 +252,10 @@ impl OathSession {
     }
 
     pub fn delete_code(&self, cred: OathCredential) -> Result<ApduResponse, Error> {
+        if self.locked {
+            return Err(Error::Authentication);
+        }
+
         self.transaction_context.apdu(
             0,
             Instruction::Delete as u8,
@@ -266,6 +275,10 @@ impl OathSession {
         cred: OathCredential,
         timestamp_sys: Option<SystemTime>,
     ) -> Result<OathCodeDisplay, Error> {
+        if self.locked {
+            return Err(Error::Authentication);
+        }
+
         if self.name != cred.device_id {
             return Err(Error::DeviceMismatch);
         }
@@ -300,6 +313,10 @@ impl OathSession {
     /// Read the OATH codes from the device, calculate TOTP codes that don't
     /// need touch
     pub fn calculate_oath_codes(&self) -> Result<Vec<RefreshableOathCredential>, Error> {
+        if self.locked {
+            return Err(Error::Authentication);
+        }
+
         let timestamp = SystemTime::now();
         // Request OATH codes from device
         let response = self.transaction_context.apdu_read_all(
@@ -338,6 +355,10 @@ impl OathSession {
         Ok(key_buffer)
     }
     pub fn list_oath_codes(&self) -> Result<Vec<CredentialIDData>, Error> {
+        if self.locked {
+            return Err(Error::Authentication);
+        }
+
         // Request OATH codes from device
         let response =
             self.transaction_context

@@ -14,7 +14,8 @@ pub enum Error {
     Pcsc(pcsc::Error),
     Parsing(String),
     DeviceMismatch,
-    FailedAuthentication,
+    Authentication,
+    Random(getrandom::Error),
 }
 
 impl Error {
@@ -39,6 +40,12 @@ impl From<pcsc::Error> for Error {
     }
 }
 
+impl From<getrandom::Error> for Error {
+    fn from(value: getrandom::Error) -> Self {
+        Self::Random(value)
+    }
+}
+
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -47,7 +54,8 @@ impl Display for Error {
             Self::Pcsc(error) => f.write_fmt(format_args!("{}", error)),
             Self::Parsing(msg) => f.write_str(msg),
             Self::DeviceMismatch => f.write_str("Devices do not match"),
-            Error::FailedAuthentication => f.write_str("Authentication failure"),
+            Self::Authentication => f.write_str("Authentication failure"),
+            Self::Random(error_response) => f.write_fmt(format_args!("{}", error_response)),
         }
     }
 }
