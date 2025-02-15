@@ -8,6 +8,7 @@ pub const OATH_AID: [u8; 7] = [0xa0, 0x00, 0x00, 0x05, 0x27, 0x21, 0x01];
 pub const DEFAULT_PERIOD: Duration = Duration::from_secs(30);
 pub const DEFAULT_DIGITS: OathDigits = OathDigits::Six;
 pub const DEFAULT_IMF: u32 = 0;
+pub const HMAC_MINIMUM_KEY_SIZE: usize = 14;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
@@ -114,7 +115,7 @@ pub enum Tag {
     Touch = 0x7c,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 #[repr(u8)]
 pub enum HashAlgo {
     Sha1 = 0x01,

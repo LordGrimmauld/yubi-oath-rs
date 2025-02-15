@@ -1,10 +1,10 @@
 #![allow(unused)]
-mod constants;
+pub mod constants;
 use constants::*;
 mod transaction;
 use transaction::*;
-mod oath_credential;
-mod oath_credentialid;
+pub mod oath_credential;
+pub mod oath_credentialid;
 /// Utilities for interacting with YubiKey OATH/TOTP functionality
 use std::{
     fmt::Display,
@@ -77,7 +77,7 @@ impl<'a> RefreshableOathCredential<'a> {
         let timestamp = SystemTime::now();
         let refresh_result = self
             .refresh_provider
-            .calculate_code(self.cred.to_owned(), Some(timestamp))
+            .calculate_code(&self.cred, Some(timestamp))
             .ok();
         self.force_update(refresh_result, timestamp);
     }
@@ -267,7 +267,7 @@ impl OathSession {
         Ok(new)
     }
 
-    pub fn delete_code(&self, cred: OathCredential) -> Result<ApduResponse, Error> {
+    pub fn delete_code(&self, cred: OathCredential) -> Result<(), Error> {
         if self.locked {
             return Err(Error::Authentication);
         }
@@ -278,7 +278,53 @@ impl OathSession {
             0,
             0,
             Some(&cred.id_data.as_tlv()),
-        )
+        )?;
+        Ok(())
+    }
+
+    pub fn put_credential(
+        &self,
+        cred: OathCredential,
+        secret: &[u8],
+        algo: HashAlgo,
+        digits: OathDigits,
+        counter: Option<u32>,
+    ) -> Result<(), Error> {
+        if self.locked {
+            return Err(Error::Authentication);
+        }
+
+        let cred_id = cred.id_data.format_cred_id();
+        let secret_short = _hmac_shorten_key(secret, algo);
+        let mut secret_padded = [0u8; HMAC_MINIMUM_KEY_SIZE];
+        let len_to_copy = secret_short.len().min(HMAC_MINIMUM_KEY_SIZE); // Avoid copying more than 14
+        secret_padded[(HMAC_MINIMUM_KEY_SIZE - len_to_copy)..]
+            .copy_from_slice(&secret_short[..len_to_copy]);
+
+        let mut data = [
+            cred.id_data.as_tlv(),
+            to_tlv(
+                Tag::Key,
+                &[
+                    [(cred.id_data.oath_type as u8) | (algo as u8), digits as u8].to_vec(),
+                    secret_padded.to_vec(),
+                ]
+                .concat(),
+            ),
+        ]
+        .concat();
+
+        if cred.touch_required {
+            data.extend([Tag::Property as u8, 2u8]); // FIXME: python impl does *not* send this to tlv, which seems to work but feels wrong. See also: https://github.com/Yubico/yubikey-manager/issues/660
+        }
+
+        if let Some(c) = counter {
+            data.extend(to_tlv(Tag::Imf, &c.to_be_bytes()));
+        }
+
+        self.transaction_context
+            .apdu(0, Instruction::Put as u8, 0, 0, Some(&data))?;
+        Ok(())
     }
 
     pub fn derive_key(&self, passphrase: &str) -> Vec<u8> {
@@ -286,9 +332,22 @@ impl OathSession {
             .to_vec()
     }
 
+    pub fn calculate_refreshable_code(
+        &self,
+        cred: &OathCredential,
+        timestamp_sys: Option<SystemTime>,
+    ) -> Result<RefreshableOathCredential, Error> {
+        let timestamp = timestamp_sys.unwrap_or_else(SystemTime::now);
+        let code = self.calculate_code(&cred, timestamp_sys)?;
+        let mut refreshable_cred = RefreshableOathCredential::new(cred.to_owned(), self);
+        refreshable_cred.force_update(Some(code), timestamp);
+
+        Ok(refreshable_cred)
+    }
+
     pub fn calculate_code(
         &self,
-        cred: OathCredential,
+        cred: &OathCredential,
         timestamp_sys: Option<SystemTime>,
     ) -> Result<OathCodeDisplay, Error> {
         if self.locked {

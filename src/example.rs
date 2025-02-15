@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
+use lib_ykoath2::constants::{HashAlgo, OathDigits, OathType, DEFAULT_PERIOD};
+use lib_ykoath2::oath_credential::OathCredential;
+use lib_ykoath2::oath_credentialid::CredentialIDData;
 use lib_ykoath2::OathSession;
 // use crate::args::Cli;
 
@@ -35,6 +38,30 @@ fn main() {
         // session.set_key(&session.derive_key("1234")).unwrap();
         // session.unlock_session(&session.derive_key("1234")).unwrap();
         // session.unset_key().unwrap();
+
+        /* let cred = OathCredential {
+            device_id: session.name.clone(),
+            id_data: CredentialIDData {
+                name: "test_cred".to_string(),
+                oath_type: OathType::Totp,
+                issuer: None,
+                period: DEFAULT_PERIOD,
+            },
+            touch_required: false,
+        };
+
+        session
+            .put_credential(
+                cred.clone(),
+                "f5up4ub3dw".as_bytes(),
+                HashAlgo::Sha256,
+                OathDigits::Six,
+                None,
+            )
+            .unwrap();
+        let calculated = session.calculate_refreshable_code(&cred, None).unwrap();
+        println!("freshly defined oath: {}", calculated);
+        session.delete_code(cred).unwrap(); */
 
         println!("YubiKey version is {:?}", session.get_version());
         for c in session.list_oath_codes().unwrap() {
