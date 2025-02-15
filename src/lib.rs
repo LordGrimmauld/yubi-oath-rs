@@ -1,38 +1,26 @@
-#![allow(unused)]
 pub mod constants;
-use constants::*;
-mod transaction;
-use transaction::*;
 pub mod oath_credential;
 pub mod oath_credentialid;
-/// Utilities for interacting with YubiKey OATH/TOTP functionality
-use std::{
-    fmt::Display,
-    ops::{Range, RangeInclusive},
-    time::{Duration, Instant, SystemTime},
-};
+mod refreshable_oath_credential;
+mod transaction;
 
-use base64::{engine::general_purpose, Engine as _};
-use hmac::{Hmac, Mac};
+use constants::*;
 use oath_credential::*;
 use oath_credentialid::*;
+use refreshable_oath_credential::*;
+use transaction::*;
 
-fn _get_device_id(salt: Vec<u8>) -> String {
-    let result = HashAlgo::Sha256.get_hash_fun()(salt.leak());
+use std::time::{Duration, SystemTime};
 
-    // Get the first 16 bytes of the hash
-    let hash_16_bytes = &result[..16];
+use hmac::{Hmac, Mac};
 
-    // Base64 encode the result and remove padding ('=')
-    general_purpose::URL_SAFE_NO_PAD.encode(hash_16_bytes)
-}
-fn _hmac_sha1(key: &[u8], message: &[u8]) -> Vec<u8> {
+fn hmac_sha1(key: &[u8], message: &[u8]) -> Vec<u8> {
     let mut mac = Hmac::<sha1::Sha1>::new_from_slice(key).expect("Invalid key length");
     mac.update(message);
     mac.finalize().into_bytes().to_vec()
 }
 
-fn _hmac_shorten_key(key: &[u8], algo: HashAlgo) -> Vec<u8> {
+fn hmac_shorten_key(key: &[u8], algo: HashAlgo) -> Vec<u8> {
     if key.len() > algo.digest_size() {
         algo.get_hash_fun()(key)
     } else {
@@ -40,81 +28,14 @@ fn _hmac_shorten_key(key: &[u8], algo: HashAlgo) -> Vec<u8> {
     }
 }
 
-pub struct RefreshableOathCredential<'a> {
-    pub cred: OathCredential,
-    pub code: Option<OathCodeDisplay>,
-    pub valid_timeframe: Range<SystemTime>,
-    refresh_provider: &'a OathSession,
-}
-
-impl Display for RefreshableOathCredential<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(c) = self.code {
-            f.write_fmt(format_args!("{}: {}", self.cred.id_data, c))
-        } else {
-            f.write_fmt(format_args!("{}", self.cred.id_data))
-        }
-    }
-}
-
-impl<'a> RefreshableOathCredential<'a> {
-    pub fn new(cred: OathCredential, refresh_provider: &'a OathSession) -> Self {
-        RefreshableOathCredential {
-            cred,
-            code: None,
-            valid_timeframe: SystemTime::UNIX_EPOCH..SystemTime::UNIX_EPOCH,
-            refresh_provider,
-        }
-    }
-
-    pub fn force_update(&mut self, code: Option<OathCodeDisplay>, timestamp: SystemTime) {
-        self.code = code;
-        self.valid_timeframe =
-            RefreshableOathCredential::format_validity_time_frame(self, timestamp);
-    }
-
-    pub fn refresh(&mut self) {
-        let timestamp = SystemTime::now();
-        let refresh_result = self
-            .refresh_provider
-            .calculate_code(&self.cred, Some(timestamp))
-            .ok();
-        self.force_update(refresh_result, timestamp);
-    }
-
-    pub fn get_or_refresh(mut self) -> RefreshableOathCredential<'a> {
-        if !self.is_valid() {
-            self.refresh();
-        }
-        self
-    }
-
-    pub fn is_valid(&self) -> bool {
-        self.valid_timeframe.contains(&SystemTime::now())
-    }
-
-    fn format_validity_time_frame(&self, timestamp: SystemTime) -> Range<SystemTime> {
-        match self.cred.id_data.oath_type {
-            OathType::Totp => {
-                let timestamp_seconds = timestamp
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .as_ref()
-                    .map_or(0, Duration::as_secs);
-                let time_step = timestamp_seconds / (self.cred.id_data.period.as_secs());
-                let valid_from = SystemTime::UNIX_EPOCH
-                    .checked_add(self.cred.id_data.period.saturating_mul(time_step as u32))
-                    .unwrap();
-                let valid_to = valid_from.checked_add(self.cred.id_data.period).unwrap();
-                valid_from..valid_to
-            }
-            OathType::Hotp => {
-                timestamp
-                    ..SystemTime::UNIX_EPOCH
-                        .checked_add(Duration::from_secs(u64::MAX))
-                        .unwrap()
-            }
-        }
-    }
+fn time_challenge(timestamp: Option<SystemTime>, period: Option<Duration>) -> [u8; 8] {
+    (timestamp
+        .unwrap_or_else(SystemTime::now)
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .as_ref()
+        .map_or(0, Duration::as_secs)
+        / period.unwrap_or(DEFAULT_PERIOD).as_secs())
+    .to_be_bytes()
 }
 
 pub struct OathSession {
@@ -180,7 +101,7 @@ impl OathSession {
             return Ok(());
         }
 
-        let hmac = _hmac_sha1(key, &chal);
+        let hmac = hmac_sha1(key, &chal);
         let random_chal = getrandom::u64()?.to_be_bytes();
         let data = &[
             to_tlv(Tag::Response, &hmac),
@@ -190,7 +111,7 @@ impl OathSession {
         let resp =
             self.transaction_context
                 .apdu(0, Instruction::Validate as u8, 0, 0, Some(data))?;
-        let verification = _hmac_sha1(key, &random_chal);
+        let verification = hmac_sha1(key, &random_chal);
         if tlv_to_map(resp.buf)
             .get(&(Tag::Response as u8))
             .map(|v| *v == verification)
@@ -208,7 +129,7 @@ impl OathSession {
             return Err(Error::Authentication);
         }
         let random_chal = getrandom::u64()?.to_be_bytes();
-        let hmac = _hmac_sha1(key, &random_chal);
+        let hmac = hmac_sha1(key, &random_chal);
         let data = &[
             to_tlv(
                 Tag::Key,
@@ -294,8 +215,7 @@ impl OathSession {
             return Err(Error::Authentication);
         }
 
-        let cred_id = cred.id_data.format_cred_id();
-        let secret_short = _hmac_shorten_key(secret, algo);
+        let secret_short = hmac_shorten_key(secret, algo);
         let mut secret_padded = [0u8; HMAC_MINIMUM_KEY_SIZE];
         let len_to_copy = secret_short.len().min(HMAC_MINIMUM_KEY_SIZE); // Avoid copying more than 14
         secret_padded[(HMAC_MINIMUM_KEY_SIZE - len_to_copy)..]
@@ -448,14 +368,4 @@ impl OathSession {
 
         Ok(key_buffer)
     }
-}
-
-fn time_challenge(timestamp: Option<SystemTime>, period: Option<Duration>) -> [u8; 8] {
-    (timestamp
-        .unwrap_or_else(SystemTime::now)
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .as_ref()
-        .map_or(0, Duration::as_secs)
-        / period.unwrap_or(DEFAULT_PERIOD).as_secs())
-    .to_be_bytes()
 }

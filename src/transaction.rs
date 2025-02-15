@@ -77,6 +77,8 @@ impl std::error::Error for Error {}
 pub struct ApduResponse {
     pub buf: Vec<u8>,
     pub sw1: u8,
+
+    #[allow(dead_code)]
     pub sw2: u8,
 }
 
@@ -213,15 +215,8 @@ pub struct TlvZipIter<'a> {
 }
 
 impl<'a> TlvZipIter<'a> {
-    pub fn new(value: &'a [u8]) -> Self {
-        TlvZipIter {
-            iter: TlvIter::new(value).into_iter(),
-        }
-    }
     pub fn from_vec(value: Vec<u8>) -> Self {
-        TlvZipIter {
-            iter: TlvIter::from_vec(value).into_iter(),
-        }
+        Self::from_tlv_iter(TlvIter::from_vec(value).into_iter())
     }
 
     pub fn from_tlv_iter(value: TlvIter<'a>) -> Self {
@@ -246,7 +241,7 @@ impl<'a> TlvIter<'a> {
         TlvIter { buf: value }
     }
     pub fn from_vec(value: Vec<u8>) -> Self {
-        TlvIter { buf: value.leak() }
+        TlvIter::new(value.leak())
     }
 }
 
@@ -261,15 +256,4 @@ impl Iterator for TlvIter<'_> {
         self.buf = remaining;
         r.ok()
     }
-}
-
-pub fn tlv_to_lists(data: Vec<u8>) -> HashMap<u8, Vec<Vec<u8>>> {
-    let mut parsed_manual: HashMap<u8, Vec<Vec<u8>>> = HashMap::new();
-    for res in TlvIter::from_vec(data) {
-        parsed_manual
-            .entry(res.tag().into())
-            .or_default()
-            .push(res.value().to_vec());
-    }
-    parsed_manual
 }

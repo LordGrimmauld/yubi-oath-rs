@@ -16,7 +16,7 @@ name = "example"
 path = "./src/example.rs"
 
 [package]
-name = "lib_ykoath2"
+name = "ykoath2"
 version = "0.1.0"
 edition = "2021"
 authors = ["Grimmauld <grimmauld@grimmauld.de>"]

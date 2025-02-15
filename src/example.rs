@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
-use lib_ykoath2::constants::{HashAlgo, OathDigits, OathType, DEFAULT_PERIOD};
-use lib_ykoath2::oath_credential::OathCredential;
-use lib_ykoath2::oath_credentialid::CredentialIDData;
-use lib_ykoath2::OathSession;
+use ykoath2::constants::{HashAlgo, OathDigits, OathType, DEFAULT_PERIOD};
+use ykoath2::oath_credential::OathCredential;
+use ykoath2::oath_credentialid::CredentialIDData;
+use ykoath2::OathSession;
 // use crate::args::Cli;
 
 // use clap::Parser;
@@ -35,11 +35,11 @@ fn main() {
         println!("Found device with label {}", device_label);
         let mut session = OathSession::new(yubikey).unwrap();
 
-        // session.set_key(&session.derive_key("1234")).unwrap();
-        // session.unlock_session(&session.derive_key("1234")).unwrap();
-        // session.unset_key().unwrap();
+        /* session.set_key(&session.derive_key("1234")).unwrap();
+        session.unlock_session(&session.derive_key("1234")).unwrap();
+        session.unset_key().unwrap();
 
-        /* let cred = OathCredential {
+        let cred = OathCredential {
             device_id: session.name.clone(),
             id_data: CredentialIDData {
                 name: "test_cred".to_string(),

@@ -127,23 +127,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lib_ykoath2"
-version = "0.1.0"
-dependencies = [
- "apdu-core",
- "base64",
- "getrandom",
- "hmac",
- "iso7816-tlv",
- "ouroboros",
- "pbkdf2",
- "pcsc",
- "regex",
- "sha1",
- "sha2",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.169"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -431,3 +414,20 @@ name = "yansi"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
+
+[[package]]
+name = "ykoath2"
+version = "0.1.0"
+dependencies = [
+ "apdu-core",
+ "base64",
+ "getrandom",
+ "hmac",
+ "iso7816-tlv",
+ "ouroboros",
+ "pbkdf2",
+ "pcsc",
+ "regex",
+ "sha1",
+ "sha2",
+]
