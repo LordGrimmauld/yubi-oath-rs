@@ -236,10 +236,10 @@ pub struct TlvIter<'a> {
 
 impl<'a> TlvIter<'a> {
     pub fn new(value: &'a [u8]) -> Self {
-        TlvIter { buf: value }
+        Self { buf: value }
     }
     pub fn from_vec(value: Vec<u8>) -> Self {
-        TlvIter::new(value.leak())
+        Self::new(value.leak())
     }
 }
 
