@@ -40,13 +40,13 @@ fn hmac_shorten_key(key: &[u8], algo: HashAlgo) -> Vec<u8> {
     }
 }
 
-fn time_challenge(timestamp: Option<SystemTime>, period: Option<Duration>) -> [u8; 8] {
+fn time_challenge(timestamp: Option<SystemTime>, period: Duration) -> [u8; 8] {
     (timestamp
         .unwrap_or_else(SystemTime::now)
         .duration_since(SystemTime::UNIX_EPOCH)
         .as_ref()
         .map_or(0, Duration::as_secs)
-        / period.unwrap_or(DEFAULT_PERIOD).as_secs())
+        / period.as_secs())
     .to_be_bytes()
 }
 
@@ -272,7 +272,7 @@ impl OathSession {
         if cred.id_data.oath_type == OathType::Totp {
             data.extend(to_tlv(
                 Tag::Challenge,
-                &time_challenge(Some(timestamp), Some(cred.id_data.period)),
+                &time_challenge(Some(timestamp), cred.id_data.get_period()),
             ));
         }
 
@@ -305,7 +305,7 @@ impl OathSession {
             0x01,
             Some(&to_tlv(
                 Tag::Challenge,
-                &time_challenge(Some(timestamp), None),
+                &time_challenge(Some(timestamp), DEFAULT_PERIOD),
             )),
         );
 
@@ -339,10 +339,13 @@ impl OathSession {
         let mut key_buffer = Vec::new();
 
         for cred_id in TlvIter::from_vec(response?) {
-            let id_data = CredentialIDData::from_bytes(
-                &cred_id.value()[1..],
-                *cred_id.value().first().unwrap_or(&0u8) & 0xf0,
-            );
+            let oath_type = if (cred_id.value()[0] & 0xf0) == (Tag::Hotp as u8) {
+                OathType::Hotp
+            } else {
+                OathType::Totp
+            };
+
+            let id_data = CredentialIDData::from_bytes(&cred_id.value()[1..], oath_type);
             key_buffer.push(id_data);
         }
 

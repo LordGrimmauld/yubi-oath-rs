@@ -44,6 +44,6 @@ impl PartialEq for OathCredential {
 impl Hash for OathCredential {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.device_id.hash(state);
-        self.id_data.format_cred_id().hash(state);
+        self.id_data.hash(state);
     }
 }

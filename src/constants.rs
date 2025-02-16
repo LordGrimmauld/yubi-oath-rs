@@ -168,8 +168,8 @@ impl HashAlgo {
 #[derive(Debug, PartialEq, Copy, Clone, Eq, Hash)]
 #[repr(u8)]
 pub enum OathType {
-    Totp = 0x10,
-    Hotp = 0x20,
+    Hotp = 0x10,
+    Totp = 0x20,
 }
 
 /// describes display information of a code, keeping track of the code and number of digits
