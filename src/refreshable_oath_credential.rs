@@ -7,18 +7,18 @@ use std::{
 use crate::{OathCodeDisplay, OathCredential, OathSession, OathType};
 
 pub struct RefreshableOathCredential<'a> {
-    pub cred: OathCredential,
-    pub code: Option<OathCodeDisplay>,
-    pub valid_timeframe: Range<SystemTime>,
+    cred: OathCredential,
+    code: Option<OathCodeDisplay>,
+    valid_timeframe: Range<SystemTime>,
     refresh_provider: &'a OathSession,
 }
 
 impl Display for RefreshableOathCredential<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(c) = self.code {
-            f.write_fmt(format_args!("{}: {}", self.cred.id_data, c))
+            f.write_fmt(format_args!("{}: {}", self.cred.id_data(), c))
         } else {
-            f.write_fmt(format_args!("{}", self.cred.id_data))
+            f.write_fmt(format_args!("{}", self.cred.id_data()))
         }
     }
 }
@@ -60,17 +60,24 @@ impl<'a> RefreshableOathCredential<'a> {
     }
 
     fn format_validity_time_frame(&self, timestamp: SystemTime) -> Range<SystemTime> {
-        match self.cred.id_data.oath_type {
+        match self.cred.id_data().oath_type() {
             OathType::Totp => {
                 let timestamp_seconds = timestamp
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .as_ref()
                     .map_or(0, Duration::as_secs);
-                let time_step = timestamp_seconds / (self.cred.id_data.period().as_secs());
+                let time_step = timestamp_seconds / (self.cred.id_data().period().as_secs());
                 let valid_from = SystemTime::UNIX_EPOCH
-                    .checked_add(self.cred.id_data.period().saturating_mul(time_step as u32))
+                    .checked_add(
+                        self.cred
+                            .id_data()
+                            .period()
+                            .saturating_mul(time_step as u32),
+                    )
                     .unwrap();
-                let valid_to = valid_from.checked_add(self.cred.id_data.period()).unwrap();
+                let valid_to = valid_from
+                    .checked_add(self.cred.id_data().period())
+                    .unwrap();
                 valid_from..valid_to
             }
             OathType::Hotp => {

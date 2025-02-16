@@ -54,8 +54,8 @@ pub struct OathSession {
     salt: Vec<u8>,
     challenge: Option<Vec<u8>>,
     transaction_context: TransactionContext,
-    pub locked: bool,
-    pub name: String,
+    locked: bool,
+    name: String,
 }
 
 impl OathSession {
@@ -192,7 +192,7 @@ impl OathSession {
             Instruction::Delete as u8,
             0,
             0,
-            Some(&cred.id_data.as_tlv()),
+            Some(&cred.id_data().as_tlv()),
         )?;
         Ok(())
     }
@@ -212,11 +212,11 @@ impl OathSession {
             .copy_from_slice(&secret_short[..len_to_copy]);
 
         let mut data = [
-            cred.id_data.as_tlv(),
+            cred.id_data().as_tlv(),
             to_tlv(
                 Tag::Key,
                 &[
-                    [(cred.id_data.oath_type as u8) | (algo as u8), digits].to_vec(),
+                    [(cred.id_data().oath_type() as u8) | (algo as u8), digits].to_vec(),
                     secret_padded.to_vec(),
                 ]
                 .concat(),
@@ -224,7 +224,7 @@ impl OathSession {
         ]
         .concat();
 
-        if cred.touch_required {
+        if cred.is_touch_required() {
             data.extend([Tag::Property as u8, 2u8]); // FIXME: python impl does *not* send this to tlv, which seems to work but feels wrong. See also: https://github.com/Yubico/yubikey-manager/issues/660
         }
 
@@ -260,17 +260,17 @@ impl OathSession {
         cred: &OathCredential,
         timestamp_sys: Option<SystemTime>,
     ) -> Result<OathCodeDisplay, Error> {
-        if self.name != cred.device_id {
+        if self.name != cred.device_id() {
             return Err(Error::DeviceMismatch);
         }
 
         let timestamp = timestamp_sys.unwrap_or_else(SystemTime::now);
 
-        let mut data = cred.id_data.as_tlv();
-        if cred.id_data.oath_type == OathType::Totp {
+        let mut data = cred.id_data().as_tlv();
+        if cred.id_data().oath_type() == OathType::Totp {
             data.extend(to_tlv(
                 Tag::Challenge,
-                &time_challenge(Some(timestamp), cred.id_data.period()),
+                &time_challenge(Some(timestamp), cred.id_data().period()),
             ));
         }
 
@@ -310,15 +310,11 @@ impl OathSession {
         let mut key_buffer = Vec::new();
 
         for (cred_id, meta) in TlvZipIter::from_vec(response?) {
-            let touch = Into::<u8>::into(meta.tag()) == (Tag::Touch as u8); // touch only works with totp, this is intended
+            let touch_required = Into::<u8>::into(meta.tag()) == (Tag::Touch as u8); // touch only works with totp, this is intended
             let id_data = CredentialIDData::from_tlv(cred_id.value(), meta.tag());
             let code = OathCodeDisplay::from_tlv(meta);
 
-            let cred = OathCredential {
-                device_id: self.name.clone(),
-                id_data,
-                touch_required: touch,
-            };
+            let cred = OathCredential::new(&self.name, id_data, touch_required);
 
             let mut refreshable_cred = RefreshableOathCredential::new(cred, self);
             refreshable_cred.force_update(code, timestamp);

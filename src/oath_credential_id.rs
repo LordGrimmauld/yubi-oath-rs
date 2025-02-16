@@ -14,15 +14,15 @@ use crate::{to_tlv, OathType, Tag, DEFAULT_PERIOD};
 pub struct CredentialIDData {
     /// name of a credential.
     /// Typically specifies an account.
-    pub name: String,
+    name: String,
 
     /// One of `OathType::Totp` or `OathType::Hotp`.
     /// Specifies the type of OTP used represented by this credential.
-    pub oath_type: OathType,
+    oath_type: OathType,
 
     /// issuer of the credential.
     /// Typically specifies the platform.
-    pub issuer: Option<String>,
+    issuer: Option<String>,
 
     /// validity period of each generated code.
     period: Option<Duration>,
@@ -53,6 +53,18 @@ impl CredentialIDData {
     /// Reconstructs the tlv data to refer to this credential on the YubiKey
     pub fn as_tlv(&self) -> Vec<u8> {
         to_tlv(Tag::Name, &self.format_cred_id())
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn issuer(&self) -> Option<&str> {
+        self.issuer.as_deref()
+    }
+
+    pub fn oath_type(&self) -> OathType {
+        self.oath_type
     }
 
     /// Returns the defined period or default
