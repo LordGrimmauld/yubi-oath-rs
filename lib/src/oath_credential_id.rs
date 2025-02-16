@@ -38,6 +38,20 @@ impl Display for CredentialIDData {
 }
 
 impl CredentialIDData {
+    pub fn new(
+        name: &str,
+        oath_type: OathType,
+        issuer: Option<&str>,
+        period: Option<Duration>,
+    ) -> Self {
+        Self {
+            name: name.to_owned(),
+            oath_type,
+            issuer: issuer.map(ToOwned::to_owned),
+            period,
+        }
+    }
+
     /// reads id data from tlv data
     /// `id_bytes` refers to the byte buffer containing issuer, name and period
     /// `oath_type_tag` refers to the tlv tag containing the oath type information

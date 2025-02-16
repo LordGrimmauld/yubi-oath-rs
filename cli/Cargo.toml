@@ -1,0 +1,8 @@
+[package]
+name = "cli"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5", features = [ "cargo", "derive" ] }
+pcsc = "2.9.0"
+ykoath2 = {path = "../lib"}
