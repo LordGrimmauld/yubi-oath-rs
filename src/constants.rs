@@ -3,7 +3,7 @@ use std::{fmt::Display, time::Duration};
 use iso7816_tlv::simple::Tlv;
 use sha1::Digest;
 
-/// te apdu instruction required to select the Oath application on the YubiKey
+/// the apdu instruction required to select the Oath application on the YubiKey
 pub const INS_SELECT: u8 = 0xa4;
 
 /// the stream of data bytes required to select the Oath application on the YubiKey
