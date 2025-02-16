@@ -66,18 +66,11 @@ impl<'a> RefreshableOathCredential<'a> {
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .as_ref()
                     .map_or(0, Duration::as_secs);
-                let time_step = timestamp_seconds / (self.cred.id_data.get_period().as_secs());
+                let time_step = timestamp_seconds / (self.cred.id_data.period().as_secs());
                 let valid_from = SystemTime::UNIX_EPOCH
-                    .checked_add(
-                        self.cred
-                            .id_data
-                            .get_period()
-                            .saturating_mul(time_step as u32),
-                    )
+                    .checked_add(self.cred.id_data.period().saturating_mul(time_step as u32))
                     .unwrap();
-                let valid_to = valid_from
-                    .checked_add(self.cred.id_data.get_period())
-                    .unwrap();
+                let valid_to = valid_from.checked_add(self.cred.id_data.period()).unwrap();
                 valid_from..valid_to
             }
             OathType::Hotp => {

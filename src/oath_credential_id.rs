@@ -56,7 +56,7 @@ impl CredentialIDData {
     }
 
     /// Returns the defined period or default
-    pub fn get_period(&self) -> Duration {
+    pub fn period(&self) -> Duration {
         self.period.unwrap_or(DEFAULT_PERIOD)
     }
 

@@ -60,7 +60,7 @@ fn main() {
         println!("freshly defined oath: {}", calculated);
         session.delete_code(cred).unwrap(); */
 
-        println!("YubiKey version is {:?}", session.get_version());
+        println!("YubiKey version is {:?}", session.version());
         for c in session.list_oath_codes().unwrap() {
             println!("{}", c);
         }

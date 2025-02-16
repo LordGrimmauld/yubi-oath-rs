@@ -134,23 +134,23 @@ pub enum HashAlgo {
 impl HashAlgo {
     /// returns a function capable of hashing a byte array
     /// necessary to be able to validate keys before enrolling them on the hardware key
-    pub fn get_hash_fun(&self) -> impl Fn(&[u8]) -> Vec<u8> {
+    pub(crate) fn hash(&self, key: &[u8]) -> Vec<u8> {
         match self {
-            Self::Sha1 => |m: &[u8]| {
+            Self::Sha1 => {
                 let mut hasher = sha1::Sha1::new();
-                hasher.update(m);
+                hasher.update(key);
                 hasher.finalize().to_vec()
-            },
-            Self::Sha256 => |m: &[u8]| {
+            }
+            Self::Sha256 => {
                 let mut hasher = sha2::Sha256::new();
-                hasher.update(m);
+                hasher.update(key);
                 hasher.finalize().to_vec()
-            },
-            Self::Sha512 => |m: &[u8]| {
+            }
+            Self::Sha512 => {
                 let mut hasher = sha2::Sha512::new();
-                hasher.update(m);
+                hasher.update(key);
                 hasher.finalize().to_vec()
-            },
+            }
         }
     }
 

@@ -32,7 +32,7 @@ fn hmac_sha1(key: &[u8], message: &[u8]) -> Vec<u8> {
 
 fn hmac_shorten_key(key: &[u8], algo: HashAlgo) -> Vec<u8> {
     if key.len() > algo.digest_size() {
-        algo.get_hash_fun()(key)
+        algo.hash(key)
     } else {
         key.to_vec()
     }
@@ -82,7 +82,7 @@ impl OathSession {
         })
     }
 
-    pub fn get_version(&self) -> &[u8] {
+    pub fn version(&self) -> &[u8] {
         &self.version
     }
 
@@ -270,7 +270,7 @@ impl OathSession {
         if cred.id_data.oath_type == OathType::Totp {
             data.extend(to_tlv(
                 Tag::Challenge,
-                &time_challenge(Some(timestamp), cred.id_data.get_period()),
+                &time_challenge(Some(timestamp), cred.id_data.period()),
             ));
         }
 
