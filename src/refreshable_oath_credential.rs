@@ -1,10 +1,10 @@
-use crate::{OathCodeDisplay, OathCredential, OathSession, OathType};
-
 use std::{
     fmt::Display,
     ops::Range,
     time::{Duration, SystemTime},
 };
+
+use crate::{OathCodeDisplay, OathCredential, OathSession, OathType};
 
 pub struct RefreshableOathCredential<'a> {
     pub cred: OathCredential,

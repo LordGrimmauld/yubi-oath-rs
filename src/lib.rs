@@ -2,7 +2,6 @@
 //!
 //! Bindings closely resemble the reverse-engineered [python library](https://github.com/Yubico/yubikey-manager/blob/main/yubikit/oath.py),
 //! as well as the discontinued crate [ykoath](https://crates.io/crates/ykoath)
-//!
 
 /// constants relevant for apdu, pcsc, error handling
 pub mod constants;
@@ -16,15 +15,14 @@ pub mod oath_credential_id;
 mod refreshable_oath_credential;
 mod transaction;
 
+use std::time::{Duration, SystemTime};
+
 use constants::*;
+use hmac::{Hmac, Mac};
 use oath_credential::*;
 use oath_credential_id::*;
 use refreshable_oath_credential::*;
 use transaction::*;
-
-use std::time::{Duration, SystemTime};
-
-use hmac::{Hmac, Mac};
 
 fn hmac_sha1(key: &[u8], message: &[u8]) -> Vec<u8> {
     let mut mac = Hmac::<sha1::Sha1>::new_from_slice(key).expect("Invalid key length");
