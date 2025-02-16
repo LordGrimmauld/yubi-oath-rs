@@ -25,7 +25,7 @@ impl Display for RefreshableOathCredential<'_> {
 
 impl<'a> RefreshableOathCredential<'a> {
     pub fn new(cred: OathCredential, refresh_provider: &'a OathSession) -> Self {
-        RefreshableOathCredential {
+        Self {
             cred,
             code: None,
             valid_timeframe: SystemTime::UNIX_EPOCH..SystemTime::UNIX_EPOCH,
@@ -35,8 +35,7 @@ impl<'a> RefreshableOathCredential<'a> {
 
     pub fn force_update(&mut self, code: Option<OathCodeDisplay>, timestamp: SystemTime) {
         self.code = code;
-        self.valid_timeframe =
-            RefreshableOathCredential::format_validity_time_frame(self, timestamp);
+        self.valid_timeframe = Self::format_validity_time_frame(self, timestamp);
     }
 
     pub fn refresh(&mut self) {
@@ -48,7 +47,7 @@ impl<'a> RefreshableOathCredential<'a> {
         self.force_update(refresh_result, timestamp);
     }
 
-    pub fn get_or_refresh(mut self) -> RefreshableOathCredential<'a> {
+    pub fn get_or_refresh(mut self) -> Self {
         if !self.is_valid() {
             self.refresh();
         }

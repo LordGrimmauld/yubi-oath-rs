@@ -47,7 +47,7 @@ impl CredentialIDData {
         } else {
             OathType::Totp
         };
-        CredentialIDData::from_bytes(id_bytes, oath_type)
+        Self::from_bytes(id_bytes, oath_type)
     }
 
     /// Reconstructs the tlv data to refer to this credential on the YubiKey
@@ -122,9 +122,9 @@ impl CredentialIDData {
 
     /// parses a credential id from byte buffers
     /// `id_bytes` contains information about issuer, name and duration
-    pub fn from_bytes(id_bytes: &[u8], oath_type: OathType) -> CredentialIDData {
-        let (issuer, name, period) = CredentialIDData::parse_cred_id(id_bytes, oath_type);
-        CredentialIDData {
+    pub fn from_bytes(id_bytes: &[u8], oath_type: OathType) -> Self {
+        let (issuer, name, period) = Self::parse_cred_id(id_bytes, oath_type);
+        Self {
             issuer,
             name,
             period,
